@@ -376,15 +376,30 @@ struct WebSocketConnectionView: View {
                 TextField("ws://192.168.0.219:8080", text: $vm.webSocketURL)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .font(.caption)
-                Button("Connect") {
-                    vm.connectWebSocket()
+                
+                if vm.isPublishing && vm.isWebRTCConnected {
+                    Button("Stop") {
+                        vm.disconnectWebSocket()
+                    }
+                    .font(.caption2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.red)
+                    .foregroundColor(.white)
+                    .cornerRadius(4)
+                } else {
+                    Button("Connect") {
+                        vm.connectWebSocket()
+                    }
+                    .font(.caption2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.green)
+                    .foregroundColor(.white)
+                    .cornerRadius(4)
                 }
-                .font(.caption2)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(4)
+                
+
             }
         }
         .padding(.vertical, 8)

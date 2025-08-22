@@ -76,8 +76,14 @@ final class CallViewModel: ObservableObject {
                 }
             } else if !isWebRTCConnected && oldValue {
                 // WebRTC bağlantısı koptu
-                print("🔄 WebRTC bağlantısı koptu, otomatik yeniden bağlanma başlatılıyor...")
-                startWebRTCReconnectTimer()
+                print("🔄 WebRTC bağlantısı koptu, yayın durduruluyor...")
+                
+                // Yayını durdur
+                isPublishing = false
+                
+                print("✋ Otomatik reconnect devre dışı - manuel bağlantı gerekli")
+                // Otomatik reconnect sistemi tamamen kaldırıldı
+                isManualDisconnect = false // Flag'i sıfırla
             }
         }
     }
@@ -93,6 +99,9 @@ final class CallViewModel: ObservableObject {
     private let webRTCReconnectInterval: TimeInterval = 3.0
     private let maxWebRTCReconnectAttempts = 10
     private var webRTCReconnectAttempts = 0
+    
+    // Manuel disconnect flag'i
+    private var isManualDisconnect = false
 
     
     private var cancellables = Set<AnyCancellable>()
@@ -421,7 +430,11 @@ final class CallViewModel: ObservableObject {
         }
         hasAttemptedConnection = true
         
-
+        print("🔌 WebSocket bağlantısı başlatılıyor: \(webSocketURL)")
+        
+        // Kamera pipeline'ını yeniden başlat
+        print("📹 Kamera pipeline yeniden başlatılıyor...")
+        setupPipeline()
         
         signalingClient.connect(to: url)
     }
@@ -431,16 +444,28 @@ final class CallViewModel: ObservableObject {
     func disconnectWebSocket() {
         print("🔌 WebSocket bağlantısı kesiliyor...")
         
+        // Manuel disconnect flag'ini set et
+        isManualDisconnect = true
+        
+        // WebRTC reconnect timer'ını durdur (manuel disconnect)
+        stopWebRTCReconnectTimer()
+        
         // Her şeyi tamamen resetle
         isPublishing = false
         isWebRTCConnected = false
         
-        // WebRTC connection'ını tamamen kapat
-        client.close()
+        // Kamera pipeline'ını tamamen temizle
+        print("📹 Kamera pipeline temizleniyor...")
+        cameraCapturer?.stopCapture()
+        camera = nil
+        cameraCapturer = nil
         
         // Compositor'u durdur
         compositor?.stop()
         compositor = nil
+        
+        // WebRTC connection'ını tamamen kapat
+        client.close()
         
         // WebRTC client'ı sıfırla
         client = WebRTCClient()
@@ -454,7 +479,7 @@ final class CallViewModel: ObservableObject {
             self.objectWillChange.send()
         }
         
-        print("🔄 Tüm bağlantılar ve yayın durumu sıfırlandı, yeni WebRTC client oluşturuldu")
+        print("🔄 Tüm bağlantılar, yayın durumu ve kamera pipeline sıfırlandı, yeni WebRTC client oluşturuldu")
     }
     
     func sendOffer() {
@@ -595,12 +620,20 @@ extension CallViewModel: WebRTCClientDelegate {
     // MARK: - WebRTC Auto-Reconnect Methods
     
     private func startWebRTCReconnectTimer() {
-        guard !isWebRTCReconnecting && webRTCReconnectAttempts < maxWebRTCReconnectAttempts else { return }
+        guard webRTCReconnectAttempts < maxWebRTCReconnectAttempts else { 
+            print("❌ WebRTC max reconnect attempts reached")
+            stopWebRTCReconnectTimer()
+            return 
+        }
+        
+        // Önceki timer'ları temizle
+        webRTCReconnectTimer?.invalidate()
+        webRTCCountdownTimer?.invalidate()
         
         isWebRTCReconnecting = true
         webRTCReconnectCountdown = Int(webRTCReconnectInterval)
         
-        print("🔄 WebRTC reconnect timer başlatıldı, \(webRTCReconnectCountdown) saniye...")
+        print("🔄 WebRTC reconnect timer başlatıldı, \(webRTCReconnectCountdown) saniye... (deneme: \(webRTCReconnectAttempts + 1)/\(maxWebRTCReconnectAttempts))")
         
         // Countdown timer
         webRTCCountdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -660,25 +693,51 @@ extension CallViewModel: WebRTCClientDelegate {
         webRTCReconnectAttempts += 1
         print("🔄 WebRTC reconnect denemesi \(webRTCReconnectAttempts)/\(maxWebRTCReconnectAttempts)")
         
-        // WebRTC bağlantısını yeniden kur
-        if isWebSocketConnected {
-            print("📡 WebSocket bağlı, WebRTC yeniden bağlanma deneniyor...")
-            // Mevcut peer connection'ı temizle ve yeniden başlat
-            client.close()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.setupPipeline()
-                self.connectWebRTC()
-            }
-        } else {
-            print("❌ WebSocket bağlı değil, önce WebSocket bağlantısı gerekli")
-            connectWebSocket()
-        }
+        // COMPLETE RESET: Tüm WebRTC state'i temizle
+        print("🧹 WebRTC complete reset başlatılıyor...")
         
-        // Eğer başarısız olursa timer'ı yeniden başlat
+        // 1. Mevcut connection'ları kapat
+        client.close()
+        signalingClient.disconnect()
+        
+        // 2. State'i sıfırla
+        isWebRTCConnected = false
+        isPublishing = false
+        
+        // 3. Pipeline'ı yeniden kur
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            if !self.isWebRTCConnected && self.isWebRTCReconnecting {
-                print("🔄 WebRTC bağlantısı başarısız, timer yeniden başlatılıyor...")
-                self.startWebRTCReconnectTimer()
+            print("🔧 Pipeline yeniden kuruluyor...")
+            self.setupPipeline()
+            
+            // 4. WebSocket bağlantısını yeniden başlat
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                print("📡 WebSocket yeniden bağlanıyor...")
+                self.connectWebSocket()
+                
+                // 5. WebRTC bağlantısını başlat
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    print("🎥 WebRTC bağlantısı başlatılıyor...")
+                    self.connectWebRTC()
+                    
+                    // 6. Bağlantı kontrolü
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                        if !self.isWebRTCConnected && self.isWebRTCReconnecting {
+                            print("🔄 WebRTC bağlantısı başarısız, bir sonraki deneme için timer başlatılıyor...")
+                            self.startWebRTCReconnectTimer()
+                        } else if self.isWebRTCConnected {
+                            print("✅ WebRTC bağlantısı başarılı!")
+                            self.stopWebRTCReconnectTimer()
+                            
+                            // WebRTC bağlandıktan sonra yayını yeniden başlat
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                if !self.isPublishing {
+                                    print("🚀 WebRTC bağlandı, yayın yeniden başlatılıyor...")
+                                    self.start()
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -692,6 +751,63 @@ extension CallViewModel: WebRTCClientDelegate {
         
         print("📡 WebRTC bağlantısı için signaling başlatılıyor: \(webSocketURL)")
         signalingClient.connect(to: url)
+    }
+    
+    func forceWebRTCReconnect() {
+        print("🚀 Zorla WebRTC yeniden bağlanma başlatıldı...")
+        
+        // Mevcut timer'ları durdur
+        stopWebRTCReconnectTimer()
+        
+        // Attempt sayısını sıfırla
+        webRTCReconnectAttempts = 0
+        
+        // COMPLETE RESET: Tüm WebRTC state'i temizle
+        print("🧹 Force reconnect: WebRTC complete reset başlatılıyor...")
+        
+        // 1. Mevcut connection'ları kapat
+        client.close()
+        signalingClient.disconnect()
+        
+        // 2. State'i sıfırla
+        isWebRTCConnected = false
+        isPublishing = false
+        
+        // 3. Pipeline'ı yeniden kur
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            print("🔧 Force reconnect: Pipeline yeniden kuruluyor...")
+            self.setupPipeline()
+            
+            // 4. WebSocket bağlantısını yeniden başlat
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                print("📡 Force reconnect: WebSocket yeniden bağlanıyor...")
+                self.connectWebSocket()
+                
+                // 5. WebRTC bağlantısını başlat
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    print("🎥 Force reconnect: WebRTC bağlantısı başlatılıyor...")
+                    self.connectWebRTC()
+                    
+                    // 6. Bağlantı kontrolü
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                        if !self.isWebRTCConnected {
+                            print("🔄 Force reconnect sonrası bağlantı kurulamadı, timer başlatılıyor...")
+                            self.startWebRTCReconnectTimer()
+                        } else {
+                            print("✅ Force reconnect başarılı!")
+                            
+                            // WebRTC bağlandıktan sonra yayını yeniden başlat
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                                if !self.isPublishing {
+                                    print("🚀 Force reconnect sonrası yayın yeniden başlatılıyor...")
+                                    self.start()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
