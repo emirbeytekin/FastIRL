@@ -8,28 +8,16 @@
 
 /* Begin PBXBuildFile section */
 		480005F82E5728620076EBC6 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 480005F72E5728620076EBC6 /* WebRTC */; };
+		4817D55A2E5919CE00E36F32 /* Starscream in Frameworks */ = {isa = PBXBuildFile; productRef = 4817D5592E5919CE00E36F32 /* Starscream */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		480005E82E5727CB0076EBC6 /* Fast IRL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Fast IRL.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		4821CE552E58C8D7000C987C /* Exceptions for "Fast IRL" folder in "Fast IRL" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"Fast-IRL-Info.plist",
-			);
-			target = 480005E72E5727CB0076EBC6 /* Fast IRL */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		480005EA2E5727CB0076EBC6 /* Fast IRL */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				4821CE552E58C8D7000C987C /* Exceptions for "Fast IRL" folder in "Fast IRL" target */,
-			);
 			path = "Fast IRL";
 			sourceTree = "<group>";
 		};
@@ -41,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				480005F82E5728620076EBC6 /* WebRTC in Frameworks */,
+				4817D55A2E5919CE00E36F32 /* Starscream in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -84,6 +73,7 @@
 			name = "Fast IRL";
 			packageProductDependencies = (
 				480005F72E5728620076EBC6 /* WebRTC */,
+				4817D5592E5919CE00E36F32 /* Starscream */,
 			);
 			productName = "Fast IRL";
 			productReference = 480005E82E5727CB0076EBC6 /* Fast IRL.app */;
@@ -115,6 +105,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				480005F62E5728620076EBC6 /* XCRemoteSwiftPackageReference "WebRTC" */,
+				4817D5582E5919CE00E36F32 /* XCRemoteSwiftPackageReference "Starscream" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 480005E92E5727CB0076EBC6 /* Products */;
@@ -362,6 +353,14 @@
 				minimumVersion = 139.0.0;
 			};
 		};
+		4817D5582E5919CE00E36F32 /* XCRemoteSwiftPackageReference "Starscream" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/daltoniam/Starscream.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.0.8;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -369,6 +368,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 480005F62E5728620076EBC6 /* XCRemoteSwiftPackageReference "WebRTC" */;
 			productName = WebRTC;
+		};
+		4817D5592E5919CE00E36F32 /* Starscream */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4817D5582E5919CE00E36F32 /* XCRemoteSwiftPackageReference "Starscream" */;
+			productName = Starscream;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

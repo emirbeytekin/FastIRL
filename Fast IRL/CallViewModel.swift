@@ -66,9 +66,33 @@ final class CallViewModel: ObservableObject {
         }
     }
     @Published var isWebSocketConnected = false
-    @Published var isWebRTCConnected = false
+    @Published var isWebRTCConnected = false {
+        didSet {
+            if isWebRTCConnected && !oldValue {
+                // WebRTC bağlantısı yeni başladı
+                stopWebRTCReconnectTimer()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.showOBSStartStreamAlert = true
+                }
+            } else if !isWebRTCConnected && oldValue {
+                // WebRTC bağlantısı koptu
+                print("🔄 WebRTC bağlantısı koptu, otomatik yeniden bağlanma başlatılıyor...")
+                startWebRTCReconnectTimer()
+            }
+        }
+    }
     @Published var hasAttemptedConnection = false
     @Published var showWebRTCAlert = false
+    @Published var showOBSStartStreamAlert = false
+    
+    // WebRTC Auto-reconnect properties
+    @Published var isWebRTCReconnecting = false
+    @Published var webRTCReconnectCountdown = 0
+    private var webRTCReconnectTimer: Timer?
+    private var webRTCCountdownTimer: Timer?
+    private let webRTCReconnectInterval: TimeInterval = 3.0
+    private let maxWebRTCReconnectAttempts = 10
+    private var webRTCReconnectAttempts = 0
 
     
     private var cancellables = Set<AnyCancellable>()
@@ -140,6 +164,16 @@ final class CallViewModel: ObservableObject {
                 self?.isWebSocketConnected = isConnected
             }
             .store(in: &cancellables)
+        
+        // Sahne değişikliği notification'ını dinle
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("SceneChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            print("🎬 Sahne değişikliği algılandı, WebRTC reconnect countdown sıfırlanıyor...")
+            self?.resetWebRTCReconnectCountdown()
+        }
     }
 
     func start() {
@@ -556,6 +590,108 @@ extension CallViewModel: WebRTCClientDelegate {
             
             print("🔗 WebRTC Connection UI updated: \(stateDescription)")
         }
+    }
+    
+    // MARK: - WebRTC Auto-Reconnect Methods
+    
+    private func startWebRTCReconnectTimer() {
+        guard !isWebRTCReconnecting && webRTCReconnectAttempts < maxWebRTCReconnectAttempts else { return }
+        
+        isWebRTCReconnecting = true
+        webRTCReconnectCountdown = Int(webRTCReconnectInterval)
+        
+        print("🔄 WebRTC reconnect timer başlatıldı, \(webRTCReconnectCountdown) saniye...")
+        
+        // Countdown timer
+        webRTCCountdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.webRTCReconnectCountdown -= 1
+                print("⏰ WebRTC reconnect countdown: \(self.webRTCReconnectCountdown)")
+                if self.webRTCReconnectCountdown <= 0 {
+                    self.webRTCCountdownTimer?.invalidate()
+                    self.webRTCCountdownTimer = nil
+                }
+            }
+        }
+        
+        // Reconnect timer
+        webRTCReconnectTimer = Timer.scheduledTimer(withTimeInterval: webRTCReconnectInterval, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                self.attemptWebRTCReconnect()
+            }
+        }
+    }
+    
+    private func stopWebRTCReconnectTimer() {
+        webRTCReconnectTimer?.invalidate()
+        webRTCReconnectTimer = nil
+        webRTCCountdownTimer?.invalidate()
+        webRTCCountdownTimer = nil
+        isWebRTCReconnecting = false
+        webRTCReconnectAttempts = 0
+        webRTCReconnectCountdown = 0
+        print("✅ WebRTC reconnect timer durduruldu")
+    }
+    
+    private func resetWebRTCReconnectCountdown() {
+        // Timer'ları durdur
+        webRTCReconnectTimer?.invalidate()
+        webRTCReconnectTimer = nil
+        webRTCCountdownTimer?.invalidate()
+        webRTCCountdownTimer = nil
+        
+        // State'i sıfırla
+        isWebRTCReconnecting = false
+        webRTCReconnectAttempts = 0
+        webRTCReconnectCountdown = 0
+        
+        print("🔄 WebRTC reconnect countdown sahne değişikliği nedeniyle sıfırlandı")
+    }
+    
+    private func attemptWebRTCReconnect() {
+        guard isWebRTCReconnecting && webRTCReconnectAttempts < maxWebRTCReconnectAttempts else {
+            print("❌ WebRTC reconnect max attempt sayısına ulaşıldı")
+            stopWebRTCReconnectTimer()
+            return
+        }
+        
+        webRTCReconnectAttempts += 1
+        print("🔄 WebRTC reconnect denemesi \(webRTCReconnectAttempts)/\(maxWebRTCReconnectAttempts)")
+        
+        // WebRTC bağlantısını yeniden kur
+        if isWebSocketConnected {
+            print("📡 WebSocket bağlı, WebRTC yeniden bağlanma deneniyor...")
+            // Mevcut peer connection'ı temizle ve yeniden başlat
+            client.close()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.setupPipeline()
+                self.connectWebRTC()
+            }
+        } else {
+            print("❌ WebSocket bağlı değil, önce WebSocket bağlantısı gerekli")
+            connectWebSocket()
+        }
+        
+        // Eğer başarısız olursa timer'ı yeniden başlat
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if !self.isWebRTCConnected && self.isWebRTCReconnecting {
+                print("🔄 WebRTC bağlantısı başarısız, timer yeniden başlatılıyor...")
+                self.startWebRTCReconnectTimer()
+            }
+        }
+    }
+    
+    private func connectWebRTC() {
+        // WebRTC bağlantısını başlat
+        guard let url = URL(string: webSocketURL) else {
+            print("❌ Geçersiz WebSocket URL: \(webSocketURL)")
+            return
+        }
+        
+        print("📡 WebRTC bağlantısı için signaling başlatılıyor: \(webSocketURL)")
+        signalingClient.connect(to: url)
     }
 }
 

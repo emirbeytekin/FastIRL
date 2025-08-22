@@ -115,6 +115,7 @@ struct ControlButton: View {
 struct NetworkStatsOverlay: View {
     @ObservedObject var client: WebRTCClient
     @ObservedObject var vm: CallViewModel
+    @ObservedObject var obsManager: OBSWebSocketManager
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -127,6 +128,62 @@ struct NetworkStatsOverlay: View {
                     .font(.system(.caption2, design: .rounded))
                     .foregroundColor(vm.isWebSocketConnected ? .green : .red)
                     .shadow(color: .black, radius: 1, x: 1, y: 1)
+            }
+            
+            // WebRTC durumu
+            HStack(spacing: 4) {
+                Image(systemName: vm.isWebRTCConnected ? "video" : "video.slash")
+                    .foregroundColor(vm.isWebRTCConnected ? .green : .red)
+                    .font(.caption2)
+                Text(vm.isWebRTCConnected ? "WebRTC ✅" : "WebRTC ❌")
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundColor(vm.isWebRTCConnected ? .green : .red)
+                    .shadow(color: .black, radius: 1, x: 1, y: 1)
+            }
+            
+            // Publishing durumu
+            if vm.isWebRTCConnected {
+                HStack(spacing: 4) {
+                    Image(systemName: vm.isPublishing ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash")
+                        .foregroundColor(vm.isPublishing ? .cyan : .yellow)
+                        .font(.caption2)
+                    Text(vm.isPublishing ? "Publishing ✅" : "Publishing ⏸️")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(vm.isPublishing ? .cyan : .yellow)
+                        .shadow(color: .black, radius: 1, x: 1, y: 1)
+                }
+            }
+            
+            // WebRTC Reconnecting durumu
+            if vm.isWebRTCReconnecting {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise.circle")
+                        .foregroundColor(.orange)
+                        .font(.caption2)
+                    Text("WebRTC Reconnecting \(vm.webRTCReconnectCountdown)")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.orange)
+                        .shadow(color: .black, radius: 1, x: 1, y: 1)
+                }
+            }
+            
+            // OBS durumu
+            HStack(spacing: 4) {
+                Image(systemName: obsManager.isConnected ? "tv" : "tv.slash")
+                    .foregroundColor(obsManager.isConnected ? .blue : .gray)
+                    .font(.caption2)
+                
+                if obsManager.isAttemptingConnection {
+                    Text("OBS Bağlanıyor \(obsManager.reconnectCountdown)")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(.orange)
+                        .shadow(color: .black, radius: 1, x: 1, y: 1)
+                } else {
+                    Text(obsManager.isConnected ? "OBS Connected" : "OBS Offline")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundColor(obsManager.isConnected ? .blue : .gray)
+                        .shadow(color: .black, radius: 1, x: 1, y: 1)
+                }
             }
             
             // Çözünürlük ve FPS
@@ -186,6 +243,9 @@ struct NetworkStatsOverlay: View {
 
 struct MainView: View {
     @StateObject var vm = CallViewModel()
+    @StateObject var obsManager = OBSWebSocketManager()
+    @State private var showingOBSControl = false
+    @State private var scenesExpanded = false
 
     let presets: [VideoPreset] = [
         VideoPreset(w: 1280, h: 720, fps: 60, label: "720p60"),
@@ -222,7 +282,7 @@ struct MainView: View {
                 // Network Stats Overlay - her zaman görünür
                 VStack {
                     HStack {
-                        NetworkStatsOverlay(client: vm.client, vm: vm)
+                        NetworkStatsOverlay(client: vm.client, vm: vm, obsManager: obsManager)
                         Spacer()
                     }
                     Spacer()
@@ -250,230 +310,168 @@ struct MainView: View {
             .frame(width: vm.sidePanelCollapsed ? 44 : 360)
                 .background(Color.black.opacity(0.35))
         }
-        .background(Color.black)
         .preferredColorScheme(.dark)
         .onAppear {
             OrientationLock.orientationLock = .landscapeRight
             OrientationLock.setLandscapeRight()
         }
-
+        .sheet(isPresented: $showingOBSControl) {
+            OBSControlView(obsManager: obsManager)
+        }
+        .alert("OBS Yayın Başlatılsın mı?", isPresented: $vm.showOBSStartStreamAlert) {
+            Button("Evet, OBS'de Yayını Başlat") {
+                if obsManager.isConnected {
+                    obsManager.startStreaming()
+                }
+            }
+            Button("Hayır, Sadece Video Yayınla", role: .cancel) { }
+        } message: {
+            Text("Görüntülü iletişim başladı. OBS'de de yayını başlatmak ister misiniz?")
+        }
     }
 
     var controls: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Fast IRL").font(.headline)
             
-            // Computed properties for button text and color
-            var buttonText: String {
-                if vm.isWebSocketConnected {
-                    if vm.isWebRTCConnected {
-                        if vm.isPublishing {
-                            return "🛑 Stop"
-                        } else {
-                            return "Disconnect"
-                        }
-                    } else {
-                        return "Reconnect"
-                    }
-                } else {
-                    return "Connect"
-                }
+            WebSocketConnectionView(vm: vm)
+            
+            VideoQualityView(vm: vm, presets: presets)
+            
+            CameraControlsView(vm: vm)
+            
+            BitratePresetsView(vm: vm, bitratePresets: bitratePresets)
+            
+            OverlayWidgetsView(vm: vm)
+            
+            OBSControlSection(obsManager: obsManager, showingOBSControl: $showingOBSControl, scenesExpanded: $scenesExpanded, toggleAudioSource: toggleAudioSource)
+            
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+    }
+}
+
+// MARK: - Separate Views
+
+struct WebSocketConnectionView: View {
+    @ObservedObject var vm: CallViewModel
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("WebRTC Signaling")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+            
+            HStack {
+                Image(systemName: vm.isWebSocketConnected ? "wifi" : "wifi.slash")
+                    .foregroundColor(vm.isWebSocketConnected ? .green : .red)
+                Text("WebSocket: \(vm.isWebSocketConnected ? "Connected" : "Disconnected")")
+                    .font(.caption)
+                    .foregroundColor(vm.isWebSocketConnected ? .green : .red)
+                Spacer()
             }
             
-            var buttonColor: Color {
-                if vm.isWebSocketConnected {
-                    if vm.isWebRTCConnected {
-                        if vm.isPublishing {
-                            return .red
-                        } else {
-                            return .red
-                        }
-                    } else {
-                        return .orange
-                    }
-                } else {
-                    return .green
+            HStack {
+                TextField("ws://192.168.0.219:8080", text: $vm.webSocketURL)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .font(.caption)
+                Button("Connect") {
+                    vm.connectWebSocket()
                 }
+                .font(.caption2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.green)
+                .foregroundColor(.white)
+                .cornerRadius(4)
             }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(Color(.systemGray6).opacity(0.3))
+        .cornerRadius(8)
+    }
+}
+
+struct VideoQualityView: View {
+    @ObservedObject var vm: CallViewModel
+    let presets: [VideoPreset]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Video Quality")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
             
-            // WebSocket Connection - En Üstte
-            VStack(alignment: .leading, spacing: 8) {
-                Text("WebRTC Signaling")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                
-                HStack {
-                    Image(systemName: vm.isWebSocketConnected ? "wifi" : "wifi.slash")
-                        .foregroundColor(vm.isWebSocketConnected ? .green : .red)
-                    Text("WebSocket: \(vm.isWebSocketConnected ? "Connected" : "Disconnected")")
-                        .font(.caption)
-                        .foregroundColor(vm.isWebSocketConnected ? .green : .red)
-                    Spacer()
-                }
-                
-
-                
-                HStack {
-                    TextField("ws://192.168.0.219:8080", text: $vm.webSocketURL)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .font(.caption)
-                    Button(buttonText) {
-                        if vm.isWebSocketConnected {
-                            if vm.isWebRTCConnected {
-                                if vm.isPublishing {
-                                    vm.stop()
-                                } else {
-                                    vm.disconnectWebSocket()
-                                }
-                            } else {
-                                // WebRTC bağlantısı kesildi ama WebSocket bağlı - sadece offer gönder
-                                vm.sendOffer()
-                                
-                            }
-                        } else {
-                            // WebSocket bağlı değil - önce bağlan
-                            vm.connectWebSocket()
-                        }
-                    }
-                    .font(.caption2)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(buttonColor)
-                    .foregroundColor(.white)
-                    .cornerRadius(4)
-                }
-                
-                // Manuel SDP Offer gönderme butonu
-                if vm.isWebSocketConnected && !vm.isWebRTCConnected {
-                    Button(action: {
-                        vm.sendOffer()
-                    }) {
-                        HStack {
-                            Image(systemName: "paperplane.fill")
-                            Text("Send SDP Offer")
-                        }
-                        .font(.caption2)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.green)
-                        .cornerRadius(6)
-                    }
-                }
-                
-
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 10)
-            .background(Color(.systemGray6).opacity(0.3))
-            .cornerRadius(8)
-
-            // Custom Video Preset Selector
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Video Quality")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible())
-                ], spacing: 8) {
-                    ForEach(presets) { preset in
-                        PresetButton(
-                            preset: preset,
-                            isSelected: vm.selectedPreset.label == preset.label,
-                            action: { 
-                                vm.selectedPreset = preset
-                                if vm.isPublishing {
-//                                    vm.stop()
-//                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-//                                        vm.start()
-//                                    }
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Start butonu kaldırıldı - otomatik başlatılıyor
-
-            // Kamera Kontrolleri
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Kamera Kontrolleri").font(.subheadline).fontWeight(.semibold)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                    ControlButton(
-                        icon: "camera.rotate.fill",
-                        label: "Flip Camera",
-                        isSelected: false,
-                        action: { vm.switchCameraPosition() }
-                    )
-                    
-                    Menu {
-                        ForEach(LensKind.allCases) { lens in
-                            Button(lens.rawValue) { 
-                                vm.setLens(lens)
-                            }
-                        }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "camera.metering.center.weighted")
-                                .font(.system(.body, design: .rounded, weight: .semibold))
-                                .foregroundColor(.primary)
-
-                            Text("Lens")
-                                .font(.system(.caption2, design: .rounded, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 8)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color(.systemGray6))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Color(.systemGray6).opacity(0.8), lineWidth: 1)
-                                )
-                        )
-                    }
-                    
-                    ControlButton(
-                        icon: vm.micOn ? "mic.fill" : "mic.slash.fill",
-                        label: "Mute",
-                        isSelected: !vm.micOn,
-                        action: { vm.toggleMic() }
-                    )
-                    
-                    ControlButton(
-                        icon: vm.torchOn ? "bolt.fill" : "bolt",
-                        label: "Flash",
-                        isSelected: vm.torchOn,
-                        action: { vm.toggleTorch() }
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: 8) {
+                ForEach(presets) { preset in
+                    PresetButton(
+                        preset: preset,
+                        isSelected: vm.selectedPreset.label == preset.label,
+                        action: { vm.selectedPreset = preset }
                     )
                 }
             }
-            
-            // Bitrate Presets
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Bitrate Seçimi").font(.subheadline).fontWeight(.semibold)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
-                    ForEach(bitratePresets) { preset in
-                        BitratePresetButton(
-                            preset: preset,
-                            isSelected: abs(vm.maxBitrateKbps - preset.value) < 1,
-                            action: {
-                                vm.setMaxBitrate(preset.value)
-                            }
-                        )
-                    }
+        }
+    }
+}
+
+struct CameraControlsView: View {
+    @ObservedObject var vm: CallViewModel
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Kamera Kontrolleri").font(.subheadline).fontWeight(.semibold)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+                ControlButton(
+                    icon: "camera.rotate.fill",
+                    label: "Flip Camera",
+                    isSelected: false,
+                    action: { vm.switchCameraPosition() }
+                )
+                
+                ControlButton(
+                    icon: vm.micOn ? "mic.fill" : "mic.slash.fill",
+                    label: "Mute",
+                    isSelected: !vm.micOn,
+                    action: { vm.toggleMic() }
+                )
+            }
+        }
+    }
+}
+
+struct BitratePresetsView: View {
+    @ObservedObject var vm: CallViewModel
+    let bitratePresets: [BitratePreset]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Bitrate Seçimi").font(.subheadline).fontWeight(.semibold)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
+                ForEach(bitratePresets) { preset in
+                    BitratePresetButton(
+                        preset: preset,
+                        isSelected: abs(vm.maxBitrateKbps - preset.value) < 1,
+                        action: { vm.setMaxBitrate(preset.value) }
+                    )
                 }
             }
+        }
+    }
+}
 
-            Divider()
-
+struct OverlayWidgetsView: View {
+    @ObservedObject var vm: CallViewModel
+    
+    var body: some View {
+        VStack(spacing: 8) {
             Toggle("Overlays", isOn: $vm.overlaysShown)
-
+            
             VStack(spacing: 8) {
                 TextField("Widget başlığı (opsiyonel)", text: $vm.newWidgetTitle)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -484,54 +482,295 @@ struct MainView: View {
                     Button("Add") { vm.addOverlayWidget() }
                 }
             }
-            
+        }
+    }
+}
 
-            
-            // WebSocket UI yukarıya taşındı
-            
-            // Send Offer butonu kaldırıldı - otomatik gönderiliyor
-            
+struct OBSControlSection: View {
+    @ObservedObject var obsManager: OBSWebSocketManager
+    @Binding var showingOBSControl: Bool
+    @Binding var scenesExpanded: Bool
+    let toggleAudioSource: (ObsSceneInput) -> Void
+    
+    var body: some View {
+        if obsManager.isConnected {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("OBS Remote Control")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.blue)
+                
+                StreamRecordControls(obsManager: obsManager)
+                
+                CurrentSceneInfo(obsManager: obsManager)
+                
+                ScenesSection(obsManager: obsManager, scenesExpanded: $scenesExpanded, toggleAudioSource: toggleAudioSource)
+                
+                Button("Full OBS Control") {
+                    showingOBSControl = true
+                }
+                .font(.caption)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Color.blue)
+                .cornerRadius(6)
+            }
+            .padding()
+            .background(Color(.systemGray6).opacity(0.3))
+            .cornerRadius(8)
+        } else {
+            Button("OBS Ayarları") {
+                showingOBSControl = true
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.gray)
+            .cornerRadius(15)
+        }
+    }
+}
 
+struct StreamRecordControls: View {
+    @ObservedObject var obsManager: OBSWebSocketManager
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: obsManager.toggleStreaming) {
+                HStack {
+                    Image(systemName: obsManager.isStreaming ? "stop.circle.fill" : "play.circle.fill")
+                    Text(obsManager.isStreaming ? "Stop Stream" : "Start Stream")
+                }
+                .font(.caption)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(obsManager.isStreaming ? Color.red : Color.green)
+                .cornerRadius(6)
+            }
+            
+            Button(action: obsManager.toggleRecording) {
+                HStack {
+                    Image(systemName: obsManager.isRecording ? "stop.circle.fill" : "record.circle.fill")
+                    Text(obsManager.isRecording ? "Stop Rec" : "Start Rec")
+                }
+                .font(.caption)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(obsManager.isRecording ? Color.red : Color.orange)
+                .cornerRadius(6)
+            }
+        }
+    }
+}
 
-            if !vm.overlayManager.widgets.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Kayıtlı Widget'lar:")
+struct CurrentSceneInfo: View {
+    @ObservedObject var obsManager: OBSWebSocketManager
+    
+    var body: some View {
+        if !obsManager.currentScene.isEmpty {
+            Text("Current Scene: \(obsManager.currentScene)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+struct ScenesSection: View {
+    @ObservedObject var obsManager: OBSWebSocketManager
+    @Binding var scenesExpanded: Bool
+    let toggleAudioSource: (ObsSceneInput) -> Void
+    
+    var body: some View {
+        if !obsManager.scenes.isEmpty {
+            VStack(spacing: 8) {
+                Button(action: { 
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        scenesExpanded.toggle()
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "tv")
+                            .foregroundColor(.blue)
+                        Text("Sahneler (\(obsManager.scenes.count))")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Spacer()
+                        Image(systemName: scenesExpanded ? "chevron.up" : "chevron.down")
+                            .foregroundColor(.blue)
+                            .font(.caption2)
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                if scenesExpanded {
+                    ScenesList(obsManager: obsManager, toggleAudioSource: toggleAudioSource)
+                }
+            }
+        }
+    }
+}
+
+struct ScenesList: View {
+    @ObservedObject var obsManager: OBSWebSocketManager
+    let toggleAudioSource: (ObsSceneInput) -> Void
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(obsManager.scenes, id: \.self) { scene in
+                SceneItem(scene: scene, obsManager: obsManager, toggleAudioSource: toggleAudioSource)
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+}
+
+struct SceneItem: View {
+    let scene: String
+    @ObservedObject var obsManager: OBSWebSocketManager
+    let toggleAudioSource: (ObsSceneInput) -> Void
+    
+    var body: some View {
+        VStack(spacing: 2) {
+            SceneButton(scene: scene, obsManager: obsManager)
+            
+            if scene == obsManager.currentScene && !obsManager.audioSources.isEmpty {
+                AudioSourcesList(obsManager: obsManager, toggleAudioSource: toggleAudioSource)
+            }
+        }
+    }
+}
+
+struct SceneButton: View {
+    let scene: String
+    @ObservedObject var obsManager: OBSWebSocketManager
+    
+    var body: some View {
+        Button(action: {
+            obsManager.changeScene(sceneName: scene)
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: "tv.circle.fill")
+                    .foregroundColor(scene == obsManager.currentScene ? .blue : .secondary)
+                    .font(.caption)
+                
+                Text(scene)
+                    .font(.caption)
+                    .fontWeight(scene == obsManager.currentScene ? .semibold : .regular)
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                if scene == obsManager.currentScene {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.blue)
                         .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    ForEach(vm.overlayManager.widgets) { w in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(w.title.isEmpty ? "Widget" : w.title)
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                Spacer()
-                                Button("Remove") { vm.removeOverlayWidget(id: w.id) }
-                                    .font(.caption2)
-                                    .foregroundColor(.red)
-                            }
-                            Text(w.urlString)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Color(.systemGray6).opacity(0.3))
-                        .cornerRadius(6)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(scene == obsManager.currentScene ? 
+                         Color.blue.opacity(0.1) : 
+                         Color(UIColor.secondarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(scene == obsManager.currentScene ? 
+                           Color.blue.opacity(0.3) : 
+                           Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct AudioSourcesList: View {
+    @ObservedObject var obsManager: OBSWebSocketManager
+    let toggleAudioSource: (ObsSceneInput) -> Void
+    
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("Ses Kaynakları:")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 12)
+            
+            ForEach(obsManager.audioSources) { source in
+                AudioSourceButton(source: source, toggleAudioSource: toggleAudioSource)
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+}
+
+struct AudioSourceButton: View {
+    let source: ObsSceneInput
+    let toggleAudioSource: (ObsSceneInput) -> Void
+    
+    var body: some View {
+        Button(action: {
+            toggleAudioSource(source)
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: source.muted == true ? "speaker.slash.circle.fill" : "speaker.wave.2.circle.fill")
+                    .foregroundColor(source.muted == true ? .red : .green)
+                    .font(.caption)
+                
+                Text(source.name)
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Text(source.muted == true ? "Muted" : "Active")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundColor(source.muted == true ? .red : .green)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(source.muted == true ? 
+                         Color.red.opacity(0.1) : 
+                         Color.green.opacity(0.1))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(source.muted == true ? 
+                           Color.red.opacity(0.2) : 
+                           Color.green.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .padding(.leading, 16)
+    }
+}
+
+// MARK: - Helper Functions
+
+extension MainView {
+    func label(_ sys: String) -> some View {
+        Image(systemName: sys).foregroundColor(.white).padding(8).background(Color.white.opacity(0.15)).clipShape(Circle())
+    }
+    
+    private func toggleAudioSource(_ source: ObsSceneInput) {
+        let newMutedState = !(source.muted ?? false)
+        obsManager.setInputMute(inputName: source.name, muted: newMutedState) { success in
+            if success {
+                DispatchQueue.main.async {
+                    if let index = obsManager.audioSources.firstIndex(where: { $0.id == source.id }) {
+                        obsManager.audioSources[index].muted = newMutedState
                     }
                 }
             }
-
-
-
-            Spacer(minLength: 0)
         }
-        .padding(12)
-    }
-
-    func label(_ sys: String) -> some View {
-        Image(systemName: sys).foregroundColor(.white).padding(8).background(Color.white.opacity(0.15)).clipShape(Circle())
     }
 }
 
