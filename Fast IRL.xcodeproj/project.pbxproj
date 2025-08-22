@@ -14,9 +14,22 @@
 		480005E82E5727CB0076EBC6 /* Fast IRL.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Fast IRL.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		4821CE552E58C8D7000C987C /* Exceptions for "Fast IRL" folder in "Fast IRL" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Fast-IRL-Info.plist",
+			);
+			target = 480005E72E5727CB0076EBC6 /* Fast IRL */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		480005EA2E5727CB0076EBC6 /* Fast IRL */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4821CE552E58C8D7000C987C /* Exceptions for "Fast IRL" folder in "Fast IRL" target */,
+			);
 			path = "Fast IRL";
 			sourceTree = "<group>";
 		};
@@ -265,7 +278,9 @@
 				DEVELOPMENT_TEAM = 3EPV7AGLM2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Fast-IRL-Info.plist";
 				INFOPLIST_KEY_NSCameraUsageDescription = "I need camera for stream";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "for live stream";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -294,7 +309,9 @@
 				DEVELOPMENT_TEAM = 3EPV7AGLM2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Fast-IRL-Info.plist";
 				INFOPLIST_KEY_NSCameraUsageDescription = "I need camera for stream";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "for live stream";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

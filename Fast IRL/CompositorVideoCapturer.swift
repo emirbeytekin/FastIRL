@@ -7,7 +7,7 @@ import WebKit
 
 // Composes camera frames with overlay widget webviews into a single RTCVideoSource.
 final class CompositorVideoCapturer: RTCVideoCapturer, RTCVideoCapturerDelegate {
-    private let source: RTCVideoSource
+    let source: RTCVideoSource  // Multi-camera için public yapıldı
     private let overlayManager: OverlayManager
     private let context = CIContext(options: [.priorityRequestLow: true])
     private var lastCameraPixelBuffer: CVPixelBuffer?
@@ -24,6 +24,8 @@ final class CompositorVideoCapturer: RTCVideoCapturer, RTCVideoCapturerDelegate 
     private var lastHtmlOverlayImage: CIImage?
     private var lastHtmlUpdateTime: CFTimeInterval = 0
     private let htmlUpdateInterval: CFTimeInterval = 1.0
+    private var lastWidgetCount = -1
+    private var lastLoggedWidgetCount = -1
 
     // API compatibility flags
     private var started: Bool = false
@@ -53,31 +55,50 @@ final class CompositorVideoCapturer: RTCVideoCapturer, RTCVideoCapturerDelegate 
         outputWidth = width
         outputHeight = height
     }
+    
+    func updateOverlayManager(_ manager: OverlayManager) {
+        // Overlay manager referansı zaten var, sadece UI'ı güncellesin
+        // Bu fonksiyon overlay list değiştiğinde pipeline restart etmeden güncelleme için
+    }
 
     private func composeAndEmit(camera: CVPixelBuffer) {
-        // Simple approach: just emit camera without overlays to test stability
         let camImage = CIImage(cvPixelBuffer: camera)
         let targetSize = CGSize(width: Int(outputWidth), height: Int(outputHeight))
         let scaledImage = scaleAspectFill(camImage, target: targetSize)
         
-        compositionQueue.async {
-            var outPixelBuffer: CVPixelBuffer?
-            let attrs: [NSString: Any] = [
-                kCVPixelBufferCGImageCompatibilityKey: true,
-                kCVPixelBufferCGBitmapContextCompatibilityKey: true
-            ]
-            CVPixelBufferCreate(kCFAllocatorDefault, Int(targetSize.width), Int(targetSize.height), kCVPixelFormatType_32BGRA, attrs as CFDictionary, &outPixelBuffer)
-            guard let out = outPixelBuffer else { return }
-            self.context.render(scaledImage, to: out)
+        // Overlay'leri işlemek için snapshot al
+        let widgetsSnapshot = overlayManager.widgets
+        
+        // Debug log - sadece widget count değişiminde log
+        if widgetsSnapshot.count != lastWidgetCount {
+            print("🎬 CompositorVideoCapturer: widgets.count=\(widgetsSnapshot.count), outputSize=\(outputWidth)x\(outputHeight)")
+            lastWidgetCount = widgetsSnapshot.count
+        }
+        
+        // Eğer overlay varsa processOverlays kullan, yoksa sadece kamera görüntüsünü gönder
+        if !widgetsSnapshot.isEmpty {
+            processOverlays(camImage: scaledImage, widgetsSnapshot: widgetsSnapshot)
+        } else {
+            // Overlay yoksa direkt kamera görüntüsünü gönder
+            compositionQueue.async {
+                var outPixelBuffer: CVPixelBuffer?
+                let attrs: [NSString: Any] = [
+                    kCVPixelBufferCGImageCompatibilityKey: true,
+                    kCVPixelBufferCGBitmapContextCompatibilityKey: true
+                ]
+                CVPixelBufferCreate(kCFAllocatorDefault, Int(targetSize.width), Int(targetSize.height), kCVPixelFormatType_32BGRA, attrs as CFDictionary, &outPixelBuffer)
+                guard let out = outPixelBuffer else { return }
+                self.context.render(scaledImage, to: out)
 
-            let rtcBuf = RTCCVPixelBuffer(pixelBuffer: out)
-            let ts = Int64(Date().timeIntervalSince1970 * 1_000_000_000)
-            let outFrame = RTCVideoFrame(buffer: rtcBuf, rotation: self.lastRotation, timeStampNs: ts)
-            self.delegate?.capturer(self, didCapture: outFrame)
+                let rtcBuf = RTCCVPixelBuffer(pixelBuffer: out)
+                let ts = Int64(Date().timeIntervalSince1970 * 1_000_000_000)
+                let outFrame = RTCVideoFrame(buffer: rtcBuf, rotation: self.lastRotation, timeStampNs: ts)
+                self.delegate?.capturer(self, didCapture: outFrame)
+            }
         }
     }
     
-    private func processOverlays(camImage: CIImage, widgetsSnapshot: [OverlayWidgetModel], videosSnapshot: [SecondaryCameraOverlayModel]) {
+    private func processOverlays(camImage: CIImage, widgetsSnapshot: [OverlayWidgetModel]) {
         compositionQueue.async {
 
             let targetSize = CGSize(width: Int(self.outputWidth), height: Int(self.outputHeight))
@@ -87,24 +108,20 @@ final class CompositorVideoCapturer: RTCVideoCapturer, RTCVideoCapturerDelegate 
             if now - self.lastHtmlUpdateTime >= self.htmlUpdateInterval {
                 self.lastHtmlOverlayImage = self.buildHtmlOverlaysImage(size: targetSize, widgets: widgetsSnapshot)
                 self.lastHtmlUpdateTime = now
+                // Sadece widget count değişiminde log
+                if widgetsSnapshot.count != self.lastLoggedWidgetCount {
+                    print("🖼️ HTML overlay image updated: widgets=\(widgetsSnapshot.count), size=\(targetSize)")
+                    self.lastLoggedWidgetCount = widgetsSnapshot.count
+                }
             }
 
             var composed = camImage
             if let html = self.lastHtmlOverlayImage {
                 composed = html.composited(over: composed)
+                // Bu log tamamen kaldırıldı - çok fazla spam yapıyor
             }
 
-            // Live video overlays (second camera) each frame
-            for v in videosSnapshot {
-                if let pb = v.lastPixelBuffer {
-                    let ci = CIImage(cvPixelBuffer: pb)
-                    let sx = v.frame.size.width / ci.extent.width
-                    let sy = v.frame.size.height / ci.extent.height
-                    let scaled = ci.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-                    let translated = scaled.transformed(by: CGAffineTransform(translationX: v.frame.origin.x, y: targetSize.height - v.frame.origin.y - v.frame.size.height))
-                    composed = translated.composited(over: composed)
-                }
-            }
+            // Video overlays kaldırıldı - sadece web widgets destekleniyor
 
             var outPixelBuffer: CVPixelBuffer?
             let attrs: [CFString: Any] = [
@@ -118,7 +135,7 @@ final class CompositorVideoCapturer: RTCVideoCapturer, RTCVideoCapturerDelegate 
             guard let out = outPixelBuffer else { return }
             self.context.render(composed, to: out)
 
-            let rtcBuf = RTCCVPixelBuffer(pixelBuffer: out)
+            let rtcBuf = RTCCVPixelBuffer(pixelBuffer:  out)
             let ts = Int64(Date().timeIntervalSince1970 * 1_000_000_000)
             let outFrame = RTCVideoFrame(buffer: rtcBuf, rotation: self.lastRotation, timeStampNs: ts)
             self.delegate?.capturer(self, didCapture: outFrame)

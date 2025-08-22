@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fast IRL - Canlı Yayın Platformu</title>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="hero">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    <span class="gradient-text">Fast IRL</span>
+                    <br>Canlı Yayın Platformu
+                </h1>
+                <p class="hero-subtitle">
+                    Tek tıkla kendi yayın odanı oluştur, izleyicilerle buluş!
+                </p>
+                
+                <div class="cta-section">
+                    <button id="createRoomBtn" class="cta-button">
+                        🚀 Yayın Odası Oluştur
+                    </button>
+                    <p class="cta-hint">Ücretsiz • Hızlı • Güvenli</p>
+                </div>
+            </div>
+            
+            <div class="hero-visual">
+                <div class="phone-mockup">
+                    <div class="phone-screen">
+                        <div class="camera-indicator"></div>
+                        <div class="live-indicator">🔴 CANLI</div>
+                        <div class="viewer-count">👥 127 izleyici</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <section class="features">
+            <h2>Özellikler</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Hızlı Kurulum</h3>
+                    <p>3 saniyede yayın odan hazır</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔐</div>
+                    <h3>Güvenli</h3>
+                    <p>Benzersiz oda ID'leri ile güvenli yayın</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📱</div>
+                    <h3>Mobil Uyumlu</h3>
+                    <p>Telefonundan kolayca yayın yap</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🌐</div>
+                    <h3>Embed</h3>
+                    <p>Web sitene yayını göm</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="how-it-works">
+            <h2>Nasıl Çalışır?</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>Oda Oluştur</h3>
+                    <p>"Yayın Odası Oluştur" butonuna tıkla</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>Linki Kopyala</h3>
+                    <p>Oluşturulan linki telefonuna gönder</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>Yayın Yap</h3>
+                    <p>Telefonda linke tıklayıp yayını başlat</p>
+                </div>
+            </div>
+        </section>
+
+        <footer class="footer">
+            <p>&copy; 2024 Fast IRL. Tüm hakları saklıdır.</p>
+        </footer>
+    </div>
+
+    <!-- Oda Oluşturuldu Modal -->
+    <div id="roomModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🎉 Yayın Odan Hazır!</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            
+            <div class="room-info">
+                <div class="room-id">
+                    <label>Oda ID:</label>
+                    <div class="id-display">
+                        <span id="roomIdDisplay"></span>
+                        <button onclick="copyRoomId()" class="copy-btn">📋</button>
+                    </div>
+                </div>
+                
+                <div class="room-links">
+                    <div class="link-group">
+                        <label>Yayın Linki:</label>
+                        <div class="link-display">
+                            <input type="text" id="roomUrlDisplay" readonly>
+                            <button onclick="copyRoomUrl()" class="copy-btn">📋</button>
+                        </div>
+                    </div>
+                    
+                    <div class="link-group">
+                        <label>Embed Linki:</label>
+                        <div class="link-display">
+                            <input type="text" id="embedUrlDisplay" readonly>
+                            <button onclick="copyEmbedUrl()" class="copy-btn">📋</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="action-buttons">
+                    <button onclick="openRoom()" class="primary-btn">🚀 Odayı Aç</button>
+                    <button onclick="shareRoom()" class="secondary-btn">📤 Paylaş</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/landing.js"></script>
+</body>
+</html>

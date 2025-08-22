@@ -9,11 +9,15 @@ enum LensKind: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// CameraMode enum kaldırıldı - sadece single-cam modu destekleniyor
+
 final class CameraController: NSObject {
-    private let capturer: RTCCameraVideoCapturer
+    let capturer: RTCCameraVideoCapturer
     private(set) var currentDevice: AVCaptureDevice?
     private(set) var currentFormat: AVCaptureDevice.Format?
     private(set) var currentFps: Int = 30
+    
+    // Multi-camera support kaldırıldı - sadece single-cam modu
 
     init(capturer: RTCCameraVideoCapturer) {
         self.capturer = capturer
@@ -33,31 +37,71 @@ final class CameraController: NSObject {
 
     func bestFormat(for device: AVCaptureDevice, targetW: Int32, targetH: Int32, targetFps: Int) -> (AVCaptureDevice.Format, Int) {
         var best: (AVCaptureDevice.Format, Int)?
-        for fmt in RTCCameraVideoCapturer.supportedFormats(for: device) {
+        let supportedFormats = RTCCameraVideoCapturer.supportedFormats(for: device)
+        print("📷 Device: \(device.localizedName), Total formats: \(supportedFormats.count)")
+        
+        for (i, fmt) in supportedFormats.enumerated() {
             let dims = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
             guard let range = fmt.videoSupportedFrameRateRanges.first else { continue }
             let okFps = min(Int(range.maxFrameRate), targetFps)
+            print("📷 Format \(i): \(dims.width)x\(dims.height), FPS: \(Int(range.minFrameRate))-\(Int(range.maxFrameRate))")
             if best == nil {
                 best = (fmt, okFps)
                 continue
             }
-            let (currFmt, _) = best!
+            let (currFmt, currFps) = best!
             let cd = CMVideoFormatDescriptionGetDimensions(currFmt.formatDescription)
-            let currScore = abs(Int(cd.width - targetW)) + abs(Int(cd.height - targetH))
-            let newScore  = abs(Int(dims.width - targetW)) + abs(Int(dims.height - targetH))
-            if newScore < currScore { best = (fmt, okFps) }
+            
+            // Prioritize higher resolution if both support target FPS
+            let currentSupportsTargetFps = currFps >= targetFps
+            let newSupportsTargetFps = okFps >= targetFps
+            
+            if newSupportsTargetFps && !currentSupportsTargetFps {
+                // New format supports target FPS, current doesn't - choose new
+                best = (fmt, okFps)
+            } else if currentSupportsTargetFps && !newSupportsTargetFps {
+                // Current supports target FPS, new doesn't - keep current
+                continue
+            } else {
+                // Both support or both don't support target FPS - choose by resolution
+                let currPixels = Int(cd.width) * Int(cd.height)
+                let newPixels = Int(dims.width) * Int(dims.height)
+                let targetPixels = Int(targetW) * Int(targetH)
+                
+                // Prefer format closest to target pixels, but prefer higher if equal distance
+                let currDistance = abs(currPixels - targetPixels)
+                let newDistance = abs(newPixels - targetPixels)
+                
+                if newDistance < currDistance || 
+                   (newDistance == currDistance && newPixels > currPixels) {
+                    best = (fmt, okFps)
+                }
+            }
         }
-        if let best { return best }
+        if let best { 
+            let dims = CMVideoFormatDescriptionGetDimensions(best.0.formatDescription)
+            print("📷 ✅ Best format selected: \(dims.width)x\(dims.height)@\(best.1)fps")
+            return best 
+        }
         let dur = device.activeVideoMaxFrameDuration
         let fps = dur.value != 0 ? Int(Double(dur.timescale) / Double(dur.value)) : 30
+        print("📷 ⚠️ Fallback to device.activeFormat")
         return (device.activeFormat, fps)
     }
 
     func start(position: AVCaptureDevice.Position, lens: LensKind, width: Int32, height: Int32, fps: Int, completion: (() -> Void)? = nil) {
+        // Sadece single-cam modu destekleniyor
+        startSingleCam(position: position, lens: lens, width: width, height: height, fps: fps, completion: completion)
+    }
+    
+    private func startSingleCam(position: AVCaptureDevice.Position, lens: LensKind, width: Int32, height: Int32, fps: Int, completion: (() -> Void)? = nil) {
         let dev = device(position: position, lens: lens) ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
         guard let dev else { return }
         // Keep original format, add explicit video orientation after capture
         let (fmt, chosenFps) = bestFormat(for: dev, targetW: width, targetH: height, targetFps: fps)
+        let dims = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+        print("📷 Camera: \(position == .front ? "Front" : "Back"), Target: \(width)x\(height)@\(fps)fps")
+        print("📷 Selected: \(dims.width)x\(dims.height)@\(chosenFps)fps")
         currentDevice = dev
         currentFormat = fmt
         currentFps = chosenFps
@@ -78,6 +122,8 @@ final class CameraController: NSObject {
             }
         }
     }
+    
+    // Multi-cam fonksiyonu kaldırıldı
 
     func switchPosition() {
         guard let dev = currentDevice else { return }

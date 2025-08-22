@@ -10,7 +10,7 @@ final class ABRManager {
 
     var enabled = true
     var thermalProtectEnabled = true
-    var targetMaxKbps: Int = 4000
+    var targetMaxKbps: Int = 8000
     var minKbps: Int = 800
     var stepDownFactor: Double = 0.8
     var stepUpFactor: Double = 1.15

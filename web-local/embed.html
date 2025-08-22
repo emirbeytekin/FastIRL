@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fast IRL - Yayın İzle</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #videoContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+        }
+        
+        #remoteVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: transparent;
+            max-width: 100%;
+            max-height: 100%;
+        }
+        
+        #remoteVideo.hidden {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            width: 0 !important;
+            height: 0 !important;
+            position: absolute !important;
+            left: -9999px !important;
+            top: -9999px !important;
+        }
+        
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            z-index: 10;
+        }
+        
+        .loading {
+            background: transparent;
+        }
+        
+        .error {
+            background: transparent;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #333;
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="videoContainer">
+        <video id="remoteVideo" autoplay playsinline></video>
+        
+        <div id="loadingOverlay" class="overlay loading">
+            <div class="spinner"></div>
+            <span>Yayın yükleniyor...</span>
+        </div>
+    </div>
+
+    <script>
+        // WebRTC ve WebSocket değişkenleri
+        let peerConnection;
+        let webSocket;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        
+        // DOM elementleri
+        const remoteVideo = document.getElementById('remoteVideo');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        
+        // Yükleme göster
+        function showLoading() {
+            loadingOverlay.classList.remove('hidden');
+        }
+        
+        // Overlayları gizle
+        function hideOverlays() {
+            loadingOverlay.classList.add('hidden');
+        }
+        
+        // Video elementini gizle ve temizle
+        function hideVideo() {
+            remoteVideo.classList.add('hidden');
+            
+            // Video stream'i hemen kaldır
+            remoteVideo.srcObject = null;
+            remoteVideo.src = '';
+            
+            // Video elementini tamamen temizle
+            remoteVideo.load();
+            
+            // 3 saniye sonra tüm overlay'leri de gizle
+            setTimeout(() => {
+                hideOverlays();
+            }, 3000);
+        }
+        
+        // Video elementini göster
+        function showVideo() {
+            remoteVideo.classList.remove('hidden');
+        }
+        
+        // WebSocket bağlantısını kur
+        function connectWebSocket() {
+            try {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//192.168.0.219:8080`;
+                
+                console.log('🔗 WebSocket bağlanıyor:', wsUrl);
+                webSocket = new WebSocket(wsUrl);
+                
+                webSocket.onopen = function() {
+                    console.log('✅ WebSocket bağlandı');
+                    reconnectAttempts = 0;
+                    hideVideo(); // Bağlantı kurulurken video gizli
+                    createPeerConnection();
+                };
+                
+                webSocket.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    console.log('📨 WebSocket mesajı:', data.type);
+                    handleWebSocketMessage(data);
+                };
+                
+                webSocket.onclose = function() {
+                    console.log('❌ WebSocket bağlantısı kesildi');
+                    hideVideo();
+                    attemptReconnect();
+                };
+                
+                webSocket.onerror = function(error) {
+                    console.error('❌ WebSocket hatası:', error);
+                    hideVideo();
+                };
+                
+            } catch (error) {
+                console.error('❌ WebSocket bağlantı hatası:', error);
+                showError('WebSocket bağlantı hatası: ' + error.message);
+            }
+        }
+        
+        // WebSocket yeniden bağlanma
+        function attemptReconnect() {
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                console.log(`🔄 Yeniden bağlanma denemesi ${reconnectAttempts}/${maxReconnectAttempts}`);
+                hideVideo(); // Yeniden bağlanma sırasında video gizli
+                setTimeout(connectWebSocket, 2000 * reconnectAttempts);
+            } else {
+                hideVideo(); // Maksimum deneme sayısına ulaşıldığında video gizli
+            }
+        }
+        
+        // WebSocket mesajlarını işle
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'welcome':
+                    console.log('👋 Sunucuya bağlandı');
+                    break;
+                    
+                case 'offer':
+                    console.log('📨 Offer alındı');
+                    handleOffer(data.offer);
+                    break;
+                    
+                case 'answer':
+                    console.log('📨 Answer alındı');
+                    handleAnswer(data.answer);
+                    break;
+                    
+                case 'ice-candidate':
+                    console.log('📨 ICE candidate alındı');
+                    handleIceCandidate(data.candidate);
+                    break;
+                    
+                default:
+                    console.log('⚠️ Bilinmeyen mesaj tipi:', data.type);
+            }
+        }
+        
+        // RTCPeerConnection oluştur
+        function createPeerConnection() {
+            try {
+                peerConnection = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                });
+                
+                peerConnection.onicecandidate = function(event) {
+                    if (event.candidate) {
+                        console.log('📤 ICE candidate gönderiliyor');
+                        sendMessage({
+                            type: 'ice-candidate',
+                            candidate: event.candidate
+                        });
+                    }
+                };
+                
+                peerConnection.ontrack = function(event) {
+                    console.log('📺 Video stream alındı');
+                    remoteVideo.srcObject = event.streams[0];
+                    showVideo();
+                    hideOverlays();
+                };
+                
+                peerConnection.onconnectionstatechange = function() {
+                    console.log('🔗 Bağlantı durumu:', peerConnection.connectionState);
+                    if (peerConnection.connectionState === 'failed') {
+                        hideVideo();
+                    }
+                };
+                
+                console.log('✅ PeerConnection oluşturuldu');
+                
+            } catch (error) {
+                console.error('❌ PeerConnection oluşturma hatası:', error);
+                showError('PeerConnection hatası: ' + error.message);
+            }
+        }
+        
+        // Offer işle
+        async function handleOffer(offer) {
+            try {
+                console.log('📥 Offer işleniyor');
+                
+                // Offer string ise parse et
+                let offerDesc;
+                if (typeof offer === 'string') {
+                    offerDesc = new RTCSessionDescription({
+                        type: 'offer',
+                        sdp: offer
+                    });
+                } else {
+                    offerDesc = new RTCSessionDescription(offer);
+                }
+                
+                console.log('📄 SDP içeriği:', offerDesc.sdp.substring(0, 100) + '...');
+                
+                await peerConnection.setRemoteDescription(offerDesc);
+                console.log('✅ Remote description set edildi');
+                
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                sendMessage({
+                    type: 'answer',
+                    answer: answer
+                });
+                
+                console.log('📤 Answer gönderildi');
+                
+            } catch (error) {
+                console.error('❌ Offer işleme hatası:', error);
+                showError('Offer işleme hatası: ' + error.message);
+            }
+        }
+        
+        // Answer işle
+        async function handleAnswer(answer) {
+            try {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                console.log('✅ Answer işlendi');
+            } catch (error) {
+                console.error('❌ Answer işleme hatası:', error);
+            }
+        }
+        
+        // ICE Candidate işle
+        async function handleIceCandidate(candidate) {
+            try {
+                // Candidate string ise parse et
+                let iceCandidate;
+                if (typeof candidate === 'string') {
+                    iceCandidate = new RTCIceCandidate(JSON.parse(candidate));
+                } else {
+                    iceCandidate = new RTCIceCandidate(candidate);
+                }
+                
+                await peerConnection.addIceCandidate(iceCandidate);
+                console.log('✅ ICE candidate eklendi');
+            } catch (error) {
+                console.error('❌ ICE candidate hatası:', error);
+            }
+        }
+        
+        // WebSocket mesajı gönder
+        function sendMessage(message) {
+            if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                webSocket.send(JSON.stringify(message));
+            }
+        }
+        
+        // Sayfa yüklendiğinde başlat
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Uygulama başlatılıyor');
+            hideVideo(); // Başlangıçta video gizli
+            showLoading();
+            connectWebSocket();
+        });
+        
+        // Sayfa kapatılırken temizle
+        window.addEventListener('beforeunload', function() {
+            if (peerConnection) {
+                peerConnection.close();
+            }
+            if (webSocket) {
+                webSocket.close();
+            }
+        });
+    </script>
+</body>
+</html>
