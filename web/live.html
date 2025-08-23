@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Fast IRL - Canlı Yayın</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+      background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+      min-height:100vh;display:flex;align-items:center;justify-content:center;color:#fff;
+    }
+
+    .container{
+      text-align:center;background:rgba(255,255,255,.1);backdrop-filter:blur(10px);
+      border-radius:20px;padding:40px;box-shadow:0 8px 32px rgba(0,0,0,.1);
+      border:1px solid rgba(255,255,255,.2);max-width:500px;width:90%;
+    }
+
+    .logo{font-size:2.5rem;font-weight:700;margin-bottom:30px;
+      background:linear-gradient(45deg,#4ecdc4,#44a08d);-webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;background-clip:text;}
+
+    .room-id{background:rgba(255,255,255,.1);padding:20px;border-radius:15px;margin:20px 0;
+      border:1px solid rgba(255,255,255,.2)}
+    .room-id-label{font-size:1.1rem;margin-bottom:10px;opacity:.9}
+    .room-id-value{font-size:2rem;font-weight:bold;color:#4ecdc4;font-family:'Courier New',monospace;letter-spacing:2px}
+
+    .status{padding:15px 20px;border-radius:10px;margin:20px 0;font-weight:500;display:flex;align-items:center;justify-content:center}
+    .status.connecting{background:rgba(255,193,7,.2);border:1px solid rgba(255,193,7,.5);color:#ffc107}
+    .status.connected{background:rgba(40,167,69,.2);border:1px solid rgba(40,167,69,.5);color:#28a745}
+    .status.error{background:rgba(220,53,69,.2);border:1px solid rgba(220,53,69,.5);color:#dc3545}
+
+    .instructions{background:rgba(255,255,255,.1);padding:20px;border-radius:15px;margin:20px 0;text-align:left}
+    .instructions h3{margin-bottom:15px;color:#4ecdc4}
+    .instructions ol{padding-left:20px}
+    .instructions li{margin-bottom:8px;line-height:1.4}
+
+    .qr-code{margin:20px 0;padding:20px;background:#fff;border-radius:15px;display:inline-block}
+
+    .copy-btn{
+      background:linear-gradient(45deg,#4ecdc4,#44a08d);color:#fff;border:none;padding:12px 24px;border-radius:25px;
+      font-size:1rem;font-weight:600;cursor:pointer;transition:.3s;margin:10px;
+    }
+    .copy-btn:hover{transform:translateY(-2px);box-shadow:0 5px 15px rgba(78,205,196,.4)}
+
+    .video-container{
+      background:rgba(0,0,0,.9);border-radius:15px;margin:20px 0;height:80vh;
+      display:flex;align-items:center;justify-content:center;width:100%;overflow:hidden;
+      position:relative;border:2px solid #4ecdc4;
+    }
+    .video-container video{
+      width:100% !important;height:100% !important;max-width:100% !important;max-height:80vh !important;
+      object-fit:fill !important;border-radius:15px;background:#000;
+    }
+
+    /* Tam ekran */
+    .video-container.fullscreen{
+      position:fixed !important;top:0 !important;left:0 !important;width:100vw !important;height:100vh !important;
+      z-index:9999 !important;margin:0 !important;border-radius:0 !important;background:#000 !important;
+      min-width:100vw !important;min-height:100vh !important;max-width:100vw !important;max-height:100vh !important;overflow:hidden !important;
+    }
+    .video-container.fullscreen video{border-radius:0 !important;width:100vw !important;height:100vh !important;object-fit:fill !important;position:fixed !important;top:0 !important;left:0 !important;z-index:1 !important}
+
+    .video-placeholder{text-align:center;color:#ccc;position:absolute;z-index:2}
+    .video-placeholder .icon{font-size:4rem;margin-bottom:20px;opacity:.5}
+
+    .hidden{display:none !important}
+    .loading{display:inline-block;width:20px;height:20px;border:3px solid rgba(255,255,255,.3);border-radius:50%;
+      border-top-color:#fff;animation:spin 1s ease-in-out infinite;margin-right:10px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    .pulse{animation:pulse 2s infinite}
+    @keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.05)}100%{transform:scale(1)}}
+
+    /* Yayın sırasında yalnızca video kalsın */
+    body.streaming .container > :not(.video-container){display:none !important}
+    body.streaming .video-container{height:auto}
+    body.streaming{background:#000}
+  </style>
+</head>
+<body>
+
+    <!-- KALICI video elemanı: DOM’dan asla kaldırılmıyor -->
+    <div class="video-container hidden" id="videoContainer">
+        <video id="remoteVideo" autoplay playsinline></video>
+  
+        <!-- Başlangıç placeholder’ı -->
+        <div id="videoPlaceholder" class="video-placeholder">
+          <div class="icon">📺</div>
+          <div>Yayın bekleniyor...</div>
+        </div>
+  
+        <!-- Tam ekran düğmesi -->
+        <!-- <button id="fullscreenBtn"
+                onclick="toggleFullscreen()"
+                style="position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.9);color:#000;border:none;padding:12px 16px;border-radius:10px;cursor:pointer;z-index:3;font-size:14px;font-weight:bold;box-shadow:0 2px 10px rgba(0,0,0,.3);">
+          ⛶ Tam Ekran
+        </button> -->
+        
+        <!-- Ses kontrol düğmesi -->
+        <!-- <button id="audioBtn"
+                onclick="toggleAudio()"
+                style="position:absolute;top:20px;right:140px;background:rgba(255,193,7,0.9);color:#000;border:none;padding:12px 16px;border-radius:10px;cursor:pointer;z-index:3;font-size:14px;font-weight:bold;box-shadow:0 2px 10px rgba(0,0,0,.3);">
+          🔇 Ses Kapalı
+        </button> -->
+      </div>
+
+      
+  <div class="container">
+    <div class="logo">Fast IRL</div>
+
+    <div class="room-id">
+      <div class="room-id-label">Oda ID:</div>
+      <div class="room-id-value" id="roomId">...</div>
+    </div>
+
+    <div class="status connecting" id="status"><span class="loading"></span>Bağlantı kuruluyor...</div>
+
+    <div class="qr-code hidden" id="qrCode"></div>
+
+    <button class="copy-btn" id="copyBtn" onclick="copyRoomId()">📋 Oda ID'yi Kopyala</button>
+
+    
+
+    <div class="instructions">
+      <h3>📱 Telefon Uygulamasında Yayın:</h3>
+      <ol>
+        <li>Yukarıdaki "Oda ID'yi Kopyala" butonuna basın</li>
+        <li>Kopyalanan ID'yi telefon uygulamasında "Oda Bağlantısı" bölümüne girin</li>
+        <li><strong>Oda ID tam olarak 6 karakter olmalı!</strong></li>
+        <li>"Connect" butonuna basın (sadece 6 karakter girildiğinde aktif olur)</li>
+        <li>Yayın otomatik olarak başlayacak ve bu sayfada görünecek</li>
+      </ol>
+      <div style="margin-top:15px;padding:10px;background:rgba(255,193,7,.1);border-left:4px solid #ffc107;border-radius:4px;">
+        <strong>🔒 Güvenlik:</strong> Sadece bu sayfada oluşturulan geçerli oda ID'leri ile bağlantı kurulabilir.
+      </div>
+    </div>
+  </div>
+
+    <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+  <script>
+    // JavaScript'i hemen çalıştır
+    console.log('🚀 JavaScript yüklendi, DOM hazır olup olmadığı kontrol ediliyor...');
+    
+    class LiveStreamPage{
+       constructor(){
+         this.roomId = this.generateRoomId();
+         this.websocket = null;
+         this.connectionAttempts = 0;
+         this.maxAttempts = 5;
+         this.peerConnection = null;
+         this.validRoomIds = new Set();
+ 
+         // DOM referansları init()'te alınacak
+         this.videoContainer = null;
+         this.remoteVideo = null;
+         this.videoPlaceholder = null;
+ 
+         this.init();
+       }
+
+             init(){
+         console.log('🔍 init() çağrıldı, DOM elementleri aranıyor...');
+         
+         // DOM referanslarını al
+         this.videoContainer = document.getElementById('videoContainer');
+         this.remoteVideo = document.getElementById('remoteVideo');
+         this.videoPlaceholder = document.getElementById('videoPlaceholder');
+         
+         console.log('📦 DOM elementleri:', {
+           videoContainer: this.videoContainer,
+           remoteVideo: this.remoteVideo,
+           videoPlaceholder: this.videoPlaceholder
+         });
+         
+         // DOM hazır mı kontrol et
+         if (!this.videoContainer || !this.remoteVideo || !this.videoPlaceholder) {
+           console.error('❌ DOM elementleri bulunamadı, sayfa henüz yüklenmedi');
+           console.log('📊 Document readyState:', document.readyState);
+           console.log('📊 DOM yüklenme durumu:', document.readyState === 'loading' ? 'Yükleniyor' : 'Hazır');
+           
+           // Daha sık kontrol et
+           setTimeout(() => this.init(), 50); // 50ms sonra tekrar dene
+           return;
+         }
+         
+         console.log('✅ DOM elementleri bulundu, başlatılıyor...');
+         
+         this.displayRoomId();
+         this.generateQRCode();
+         this.addValidRoomId(this.roomId);
+         this.connectWebSocket();
+         this.updateStatus('connecting','Bağlantı kuruluyor...');
+       }
+
+      generateRoomId(){
+        const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let r=''; for(let i=0;i<6;i++){ r+=chars.charAt(Math.floor(Math.random()*chars.length)); }
+        return r;
+      }
+
+      addValidRoomId(roomId){ this.validRoomIds.add(roomId); }
+      isValidRoomId(roomId){ return this.validRoomIds.has(roomId); }
+
+      displayRoomId(){ document.getElementById('roomId').textContent=this.roomId; }
+
+      generateQRCode(){
+        const qr=document.getElementById('qrCode');
+        qr.innerHTML=`
+          <div style="text-align:center;padding:20px;">
+            <div style="font-size:48px;font-weight:bold;color:#4ecdc4;margin-bottom:10px;">${this.roomId}</div>
+            <div style="font-size:16px;color:#666;">Bu ID'yi telefon uygulamasında girin</div>
+          </div>`;
+        qr.classList.remove('hidden');
+      }
+
+             // ---- WebSocket
+       connectWebSocket(){
+         console.log('🔌 connectWebSocket() çağrıldı');
+         
+         if(!this.roomId || this.roomId.length!==6){
+           console.error('❌ Geçersiz oda ID:', this.roomId);
+           this.updateStatus('error','❌ Geçersiz oda ID! 6 karakter olmalı.'); 
+           return;
+         }
+         
+         if(!this.isValidRoomId(this.roomId)){
+           console.error('❌ Bu oda ID geçerli değil:', this.roomId);
+           this.updateStatus('error','❌ Bu oda ID geçerli değil!'); 
+           return;
+         }
+ 
+         const host = window.location.hostname;
+         const port = window.location.port || '8080';
+         const wsUrl = `ws://${host}:${port}/${this.roomId}`;
+         
+         console.log('🌐 WebSocket URL oluşturuluyor:', {
+           host: host,
+           port: port,
+           roomId: this.roomId,
+           wsUrl: wsUrl
+         });
+         
+         try{
+           console.log('🔌 WebSocket bağlantısı başlatılıyor:', wsUrl);
+           this.websocket = new WebSocket(wsUrl);
+
+                     this.websocket.onopen = ()=>{
+             console.log('✅ WebSocket bağlantısı başarılı!');
+             this.updateStatus('connected','✅ WebSocket bağlandı! Yayın bekleniyor...');
+             this.connectionAttempts = 0;
+             
+             setTimeout(()=>{
+               if(this.websocket?.readyState===WebSocket.OPEN){
+                 console.log('📤 Ping mesajı gönderiliyor...');
+                 this.websocket.send(JSON.stringify({type:'ping',roomId:this.roomId,timestamp:Date.now()}));
+               }
+             },1000);
+           };
+
+          this.websocket.onmessage = (ev)=>{
+            let data; try{ data=JSON.parse(ev.data);}catch(e){return;}
+            this.handleWebSocketMessage(data);
+          };
+
+                     this.websocket.onclose = (ev)=>{
+             console.log('❌ WebSocket bağlantısı kesildi:', {
+               code: ev.code,
+               reason: ev.reason,
+               wasClean: ev.wasClean
+             });
+             
+             this.updateStatus('error',`❌ WebSocket bağlantısı kesildi (Kod: ${ev.code})`);
+             this.stopStreamingUI();
+             
+             if(this.connectionAttempts < this.maxAttempts){
+               this.connectionAttempts++;
+               console.log(`🔄 Yeniden bağlanma denemesi: ${this.connectionAttempts}/${this.maxAttempts}`);
+               setTimeout(()=>{
+                 this.updateStatus('connecting',`🔄 Yeniden bağlanılıyor... (${this.connectionAttempts}/${this.maxAttempts})`);
+                 this.connectWebSocket();
+               },2000);
+             }else{
+               console.log('❌ Maksimum bağlantı denemesi aşıldı');
+               this.updateStatus('error','❌ Maksimum bağlantı denemesi aşıldı. Sayfayı yenileyin.');
+             }
+           };
+ 
+           this.websocket.onerror = (error)=>{
+             console.error('❌ WebSocket hatası:', error);
+             this.updateStatus('error','❌ WebSocket bağlantı hatası');
+           };
+
+                 }catch(e){
+           console.error('❌ WebSocket bağlantı hatası (catch):', e);
+           this.updateStatus('error','❌ WebSocket bağlantısı kurulamadı');
+         }
+      }
+
+      handleWebSocketMessage(data){
+        switch(data.type){
+          case 'welcome':
+            this.updateStatus('connected','✅ Sunucuya bağlandı! Yayın bekleniyor...');
+            break;
+          case 'pong':
+            break;
+          case 'offer':
+            this.handleOffer(data);
+            break;
+          case 'answer':
+            this.handleAnswer(data);
+            break;
+          case 'ice-candidate':
+            this.handleIceCandidate(data);
+            break;
+          case 'stream_started':
+            this.updateStatus('connected','🎥 Yayın başladı!');
+            this.showVideoContainer('🎥 Yayın aktif! Video yakında görünecek...');
+            break;
+          case 'stream_ended':
+            this.updateStatus('connecting','⏹️ Yayın sonlandı. Yeni yayın bekleniyor...');
+            this.stopStreamingUI();
+            break;
+          case 'error':
+            this.updateStatus('error',`❌ Hata: ${data.message}`);
+            this.stopStreamingUI();
+            break;
+        }
+      }
+
+      updateStatus(type,message){
+        const el=document.getElementById('status');
+        el.className=`status ${type}`;
+        el.innerHTML = (type==='connecting') ? `<span class="loading"></span>${message}` : message;
+        if(type==='connected') el.classList.add('pulse'); else el.classList.remove('pulse');
+      }
+
+      showVideoContainer(message){
+        document.getElementById('qrCode').classList.add('hidden');
+        this.videoContainer.classList.remove('hidden');
+        this.videoPlaceholder.classList.remove('hidden');
+        this.videoPlaceholder.querySelector('div:last-child').textContent = message;
+      }
+
+      // ---- WebRTC
+      async handleOffer(data){
+        try{
+          this.peerConnection = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
+
+          this.peerConnection.ontrack = (ev)=>{
+            this.showRemoteVideo(ev.streams[0]);
+          };
+
+          this.peerConnection.onicecandidate = (ev)=>{
+            if(ev.candidate){
+              this.websocket?.send(JSON.stringify({type:'ice-candidate',candidate:ev.candidate,roomId:this.roomId}));
+            }
+          };
+
+          await this.peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await this.peerConnection.createAnswer();
+          await this.peerConnection.setLocalDescription(answer);
+          this.websocket?.send(JSON.stringify({type:'answer',answer,roomId:this.roomId}));
+          this.updateStatus('connected','🎥 WebRTC bağlantısı kuruldu! Yayın bekleniyor...');
+        }catch(e){
+          this.updateStatus('error','❌ WebRTC bağlantı hatası');
+          this.stopStreamingUI();
+        }
+      }
+
+      async handleAnswer(data){
+        try{
+          if(this.peerConnection){
+            await this.peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+          }
+        }catch(e){}
+      }
+
+      async handleIceCandidate(data){
+        try{
+          if(this.peerConnection){
+            await this.peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+          }
+        }catch(e){}
+      }
+
+      showRemoteVideo(stream){
+        // Kalıcı video elementi kullan
+        this.videoContainer.classList.remove('hidden');
+        this.remoteVideo.srcObject = stream;
+
+        // UI: yalnızca video kalsın
+        this.startStreamingUI();
+
+        // Oynat
+        const playTry=()=>this.remoteVideo.play().catch(()=>setTimeout(playTry,500));
+        playTry();
+        
+        // Ses kontrolünü güncelle
+        this.updateAudioButton();
+      }
+
+      // ---- UI Modları
+      startStreamingUI(){
+        document.body.classList.add('streaming');      // diğer bölümleri gizle
+        this.videoPlaceholder.classList.add('hidden');  // placeholder’ı gizle
+
+        // Yayın başladığında otomatik tam ekran istiyorsan:
+        setTimeout(()=>{ if(!this.videoContainer.classList.contains('fullscreen')) toggleFullscreen(); }, 800);
+      }
+
+      stopStreamingUI(){
+        document.body.classList.remove('streaming');
+        this.videoPlaceholder.classList.remove('hidden');
+        // videoyu DOM’dan kaldırmıyoruz — sabit kalacak
+        // istersen sadece stream’i kes:
+        // this.remoteVideo.srcObject = null;
+      }
+    }
+
+         // ---- Sayfa ömrü
+     let livePage;
+     
+     // DOM yüklendikten sonra başlat
+     function startLivePage() {
+       console.log('🎯 startLivePage() çağrıldı');
+       console.log('📊 Document readyState:', document.readyState);
+       
+       if (document.readyState === 'loading') {
+         // DOM henüz yüklenmedi, bekleyelim
+         console.log('⏳ DOM henüz yüklenmedi, DOMContentLoaded bekleniyor...');
+         document.addEventListener('DOMContentLoaded', startLivePage);
+         return;
+       }
+       
+       // DOM hazır, başlat
+       console.log('🚀 DOM hazır, LiveStreamPage başlatılıyor...');
+       livePage = new LiveStreamPage();
+     }
+     
+     // Hemen başlatmayı dene
+     console.log('🎯 Hemen başlatma deneniyor...');
+     startLivePage();
+     
+     // Ayrıca DOMContentLoaded event'ini de dinle
+     document.addEventListener('DOMContentLoaded', startLivePage);
+
+    function copyRoomId(){
+      const roomId=document.getElementById('roomId').textContent;
+      navigator.clipboard.writeText(roomId).then(()=>showCopySuccess('Oda ID kopyalandı!'))
+      .catch(()=>{
+        const ta=document.createElement('textarea'); ta.value=roomId; document.body.appendChild(ta);
+        ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+        showCopySuccess('Oda ID kopyalandı!');
+      });
+    }
+
+    function showCopySuccess(msg){
+      const div=document.createElement('div');
+      div.textContent=msg;
+      div.style.cssText=`position:fixed;top:20px;right:20px;background:#28a745;color:#fff;padding:15px 20px;border-radius:10px;z-index:1000;animation:slideIn .3s ease-out;`;
+      document.body.appendChild(div);
+      setTimeout(()=>{div.style.animation='slideOut .3s ease-in';setTimeout(()=>document.body.removeChild(div),300);},2000);
+    }
+    const style=document.createElement('style');
+    style.textContent=`@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+                       @keyframes slideOut{from{transform:translateX(0);opacity:1}to{transform:translateX(100%);opacity:0}}`;
+    document.head.appendChild(style);
+
+    // ---- Tam ekran
+    function toggleFullscreen(){
+      const vc=document.getElementById('videoContainer');
+      const btn=document.getElementById('fullscreenBtn');
+      if(vc.classList.contains('fullscreen')){
+        vc.classList.remove('fullscreen'); btn.textContent='⛶ Tam Ekran';
+      }else{
+        vc.classList.add('fullscreen'); btn.textContent='⛶ Küçült';
+      }
+    }
+    document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ const vc=document.getElementById('videoContainer'); if(vc.classList.contains('fullscreen')) toggleFullscreen(); } });
+    
+    // ---- Ses kontrolü
+    function toggleAudio(){
+      const video = document.getElementById('remoteVideo');
+      const btn = document.getElementById('audioBtn');
+      
+      if(video.muted){
+        video.muted = false;
+        btn.textContent = '🔇 Ses Kapalı';
+        btn.style.background = 'rgba(255,193,7,0.9)';
+      } else {
+        video.muted = true;
+        btn.textContent = '🔊 Ses Açık';
+        btn.style.background = 'rgba(255,255,255,0.9)';
+      }
+    }
+
+    // ---- Temizlik
+    window.addEventListener('beforeunload',()=>{
+      if(livePage){
+        try{ livePage.websocket?.close(); }catch(e){}
+        try{ livePage.peerConnection?.close(); }catch(e){}
+      }
+    });
+  </script>
+</body>
+</html>

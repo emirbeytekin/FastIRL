@@ -505,23 +505,35 @@ struct WebSocketConnectionView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("WebRTC Signaling")
+            Text("Oda Bağlantısı")
                 .font(.subheadline)
                 .fontWeight(.semibold)
             
             HStack {
                 Image(systemName: vm.isWebSocketConnected ? "wifi" : "wifi.slash")
                     .foregroundColor(vm.isWebSocketConnected ? .green : .red)
-                Text("WebSocket: \(vm.isWebSocketConnected ? "Connected" : "Disconnected")")
+                Text("Bağlantı: \(vm.isWebSocketConnected ? "Bağlandı" : "Bağlanmadı")")
                     .font(.caption)
                     .foregroundColor(vm.isWebSocketConnected ? .green : .red)
                 Spacer()
             }
             
+            // Oda ID girişi
             HStack {
-                TextField("ws://192.168.0.219:8080", text: $vm.webSocketURL)
+                TextField("Oda ID girin...", text: $vm.roomId)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .font(.caption)
+                    .onChange(of: vm.roomId) { newValue in
+                        // Sadece büyük harf ve rakam kabul et
+                        let filtered = newValue.uppercased().filter { $0.isLetter || $0.isNumber }
+                        if filtered != newValue {
+                            vm.roomId = filtered
+                        }
+                        // Maksimum 6 karakter
+                        if filtered.count > 6 {
+                            vm.roomId = String(filtered.prefix(6))
+                        }
+                    }
                 
                 if vm.isPublishing && vm.isWebRTCConnected {
                     Button("Stop") {
@@ -540,12 +552,26 @@ struct WebSocketConnectionView: View {
                     .font(.caption2)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color.green)
+                    .background(vm.roomId.count == 6 ? Color.green : Color.gray)
                     .foregroundColor(.white)
                     .cornerRadius(4)
+                    .disabled(vm.roomId.count != 6)
                 }
-                
-
+            }
+            
+            // Oda ID validation mesajı
+            if !vm.roomId.isEmpty && vm.roomId.count != 6 {
+                Text("⚠️ Oda ID 6 karakter olmalı (Mevcut: \(vm.roomId.count))")
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+            }
+            
+            // WebSocket URL girişi (gelişmiş kullanıcılar için)
+            HStack {
+                TextField("WebSocket URL (opsiyonel)", text: $vm.webSocketURL)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .padding(.vertical, 8)

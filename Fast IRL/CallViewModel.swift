@@ -166,9 +166,14 @@ final class CallViewModel: ObservableObject {
     
     // Signaling
     let signalingClient = SignalingClient()
-    @Published var webSocketURL = UserDefaults.standard.string(forKey: "webSocketURL") ?? "http://192.168.0.219:8080" {
+    @Published var webSocketURL = UserDefaults.standard.string(forKey: "webSocketURL") ?? "ws://173.249.21.219:8080" {
         didSet {
             UserDefaults.standard.set(webSocketURL, forKey: "webSocketURL")
+        }
+    }
+    @Published var roomId: String = "" {
+        didSet {
+            UserDefaults.standard.set(roomId, forKey: "roomId")
         }
     }
     @Published var isWebSocketConnected = false
@@ -270,9 +275,9 @@ final class CallViewModel: ObservableObject {
         }
         
         // Load saved room ID
-//        if let savedRoomId = UserDefaults.standard.string(forKey: "roomId") {
-//            self.roomId = savedRoomId
-//        }
+        if let savedRoomId = UserDefaults.standard.string(forKey: "roomId") {
+            self.roomId = savedRoomId
+        }
         
         // Update currentFps to match selectedPreset
         self.currentFps = self.selectedPreset.fps
@@ -657,13 +662,32 @@ final class CallViewModel: ObservableObject {
     // MARK: - Signaling Functions
     
     func connectWebSocket() {
-        guard let url = URL(string: webSocketURL) else {
-            print("❌ Invalid WebSocket URL: \(webSocketURL)")
+        // Oda ID kontrolü
+        guard !roomId.isEmpty else {
+            print("❌ Oda ID boş olamaz!")
+            return
+        }
+        
+        guard roomId.count == 6 else {
+            print("❌ Oda ID 6 karakter olmalı! Mevcut: \(roomId.count)")
+            return
+        }
+        
+        // Oda ID'yi WebSocket URL'ine ekle
+        var wsURL = webSocketURL
+        if wsURL.hasSuffix("/") {
+            wsURL += roomId
+        } else {
+            wsURL += "/" + roomId
+        }
+        
+        guard let url = URL(string: wsURL) else {
+            print("❌ Invalid WebSocket URL: \(wsURL)")
             return
         }
         hasAttemptedConnection = true
         
-        print("🔌 WebSocket bağlantısı başlatılıyor: \(webSocketURL)")
+        print("🔌 WebSocket bağlantısı başlatılıyor: \(wsURL)")
         
         // Kamera pipeline'ını yeniden başlat
         print("📹 Kamera pipeline yeniden başlatılıyor...")
@@ -770,6 +794,8 @@ extension CallViewModel: SignalingClientDelegate {
         isWebSocketConnected = false
         // Not: Otomatik yayın sonlandırma kaldırıldı - kullanıcı manuel disconnect butonu ile durduracak
     }
+    
+
     
 
     

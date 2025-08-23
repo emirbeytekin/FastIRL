@@ -30,7 +30,7 @@ final class SignalingClient: NSObject {
         components.scheme = "ws"
         components.host = url.host ?? "localhost"
         components.port = url.port ?? 8080
-        components.path = "/"
+        components.path = url.path // Oda ID'yi koru!
         
         guard let wsURL = components.url else {
             print("❌ WebSocket URL oluşturulamadı")

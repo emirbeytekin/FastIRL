@@ -50,6 +50,8 @@ let connectionStats = {
     reconnected: 0
 };
 
+
+
 // Bağlantı durumunu log'la
 function logConnectionStats() {
     console.log(`📊 Bağlantı İstatistikleri:`);
@@ -84,20 +86,34 @@ wss.on('connection', (ws, req) => {
     const clientId = Math.random().toString(36).substr(2, 9);
     const clientIP = req.socket.remoteAddress || 'unknown';
     
-    console.log(`🔗 Yeni client bağlandı [${clientId}] - IP: ${clientIP}`);
-    connections.push(ws);
-    connectionStats.total++;
-    connectionStats.active++;
+    // URL'den oda ID'yi al
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const roomId = url.pathname.substring(1); // İlk "/" karakterini kaldır
     
-    // Client'a ID ata
+    console.log(`🔗 Yeni client bağlandı [${clientId}] - IP: ${clientIP} - Oda: ${roomId}`);
+    
+    // Oda ID kontrolü
+    if (!roomId || roomId.length !== 6) {
+        console.log(`❌ Geçersiz oda ID: ${roomId}`);
+        ws.close(1008, 'Geçersiz oda ID');
+        return;
+    }
+    
+    // Oda ID'yi client'a ata
+    ws.roomId = roomId;
     ws.clientId = clientId;
     ws.clientIP = clientIP;
     ws.connectedAt = Date.now();
+    
+    connections.push(ws);
+    connectionStats.total++;
+    connectionStats.active++;
     
     // Welcome mesajı
     ws.send(JSON.stringify({
         type: 'welcome',
         message: 'Fast IRL Signaling Server\'a hoş geldiniz!',
+        roomId: roomId,
         clientId: clientId,
         timestamp: Date.now()
     }));
@@ -107,23 +123,25 @@ wss.on('connection', (ws, req) => {
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            console.log(`📨 [${clientId}] Mesaj alındı: ${data.type}`);
+            console.log(`📨 [${clientId}] Oda: ${roomId} - Mesaj alındı: ${data.type}`);
             
-            // Diğer tüm clientlara forward et
+            // Sadece aynı oda ID'ye sahip client'lara forward et
             let forwardedCount = 0;
             connections.forEach(client => {
-                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                if (client !== ws && client.readyState === WebSocket.OPEN && client.roomId === roomId) {
                     client.send(JSON.stringify(data));
                     forwardedCount++;
                 }
             });
             
             if (forwardedCount > 0) {
-                console.log(`📤 [${clientId}] Mesaj ${forwardedCount} client'a forward edildi: ${data.type}`);
+                console.log(`📤 [${clientId}] Oda: ${roomId} - Mesaj ${forwardedCount} client'a forward edildi: ${data.type}`);
+            } else {
+                console.log(`📤 [${clientId}] Oda: ${roomId} - Mesaj forward edilemedi (aynı odada başka client yok)`);
             }
             
         } catch (error) {
-            console.error(`❌ [${clientId}] Mesaj işleme hatası:`, error);
+            console.error(`❌ [${clientId}] Oda: ${roomId} - Mesaj işleme hatası:`, error);
             // Client'a hata mesajı gönder
             ws.send(JSON.stringify({
                 type: 'error',
@@ -135,14 +153,14 @@ wss.on('connection', (ws, req) => {
     
     ws.on('close', (code, reason) => {
         const duration = Date.now() - ws.connectedAt;
-        console.log(`❌ [${clientId}] Client bağlantısı kesildi - Kod: ${code}, Sebep: ${reason || 'Bilinmiyor'}, Süre: ${Math.round(duration / 1000)}s`);
+        console.log(`❌ [${clientId}] Oda: ${roomId} - Client bağlantısı kesildi - Kod: ${code}, Sebep: ${reason || 'Bilinmiyor'}, Süre: ${Math.round(duration / 1000)}s`);
         connections = connections.filter(conn => conn !== ws);
         connectionStats.active = connections.length;
         logConnectionStats();
     });
     
     ws.on('error', (error) => {
-        console.error(`❌ [${clientId}] WebSocket hatası:`, error);
+        console.error(`❌ [${clientId}] Oda: ${roomId} - WebSocket hatası:`, error);
     });
     
     // Ping/Pong ile bağlantı durumunu kontrol et
@@ -156,7 +174,7 @@ wss.on('connection', (ws, req) => {
 const pingInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
         if (ws.isAlive === false) {
-            console.log(`💀 [${ws.clientId || 'unknown'}] Bağlantı ölü, kapatılıyor`);
+            console.log(`💀 [${ws.clientId || 'unknown'}] Oda: ${ws.roomId || 'unknown'} - Bağlantı ölü, kapatılıyor`);
             return ws.terminate();
         }
         
