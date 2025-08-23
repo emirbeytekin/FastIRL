@@ -94,7 +94,7 @@ struct ControlButton: View {
 
                 Text(label)
                     .font(.system(.caption2, design: .rounded, weight: .medium))
-                    .foregroundColor((isSelected && (label == "Mute" || label == "Flash")) ? .white : .secondary)
+                    .foregroundColor((isSelected && (label == "Mute" || label == "Flash" || label == "HDR" || label == "Night Mode")) ? .white : .secondary)
             }
             .padding(.vertical, 10)
             .padding(.horizontal, 8)
@@ -104,6 +104,54 @@ struct ControlButton: View {
                     .fill(buttonColor)
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
+                            .stroke(buttonColor.opacity(0.8), lineWidth: isSelected ? 2 : 1)
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct StabilizationButton: View {
+    let mode: StabilizationMode
+    let isSelected: Bool
+    let action: () -> Void
+    
+    private var buttonColor: Color {
+        isSelected ? .purple : Color(.systemGray6)
+    }
+    
+    private var icon: String {
+        switch mode {
+        case .off: return "video.slash"
+        case .standard: return "video.badge.checkmark"
+        case .cinematic: return "camera.aperture"
+        case .cinematicExtended: return "camera.metering.center.weighted"
+        case .auto: return "wand.and.stars"
+        }
+    }
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundColor(isSelected ? .white : .primary)
+                
+                Text(mode.rawValue)
+                    .font(.system(.caption2, design: .rounded, weight: .medium))
+                    .foregroundColor(isSelected ? .white : .secondary)
+                    .minimumScaleFactor(0.8)
+                    .lineLimit(1)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(buttonColor)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
                             .stroke(buttonColor.opacity(0.8), lineWidth: isSelected ? 2 : 1)
                     )
             )
@@ -197,6 +245,41 @@ struct NetworkStatsOverlay: View {
                     .shadow(color: .black, radius: 1, x: 1, y: 1)
             }
             
+            // Yayın süresi (sadece yayın aktifken)
+            if vm.isPublishing && vm.isWebRTCConnected {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock")
+                        .foregroundColor(.orange)
+                        .font(.caption2)
+                    Text("Yayın: \(vm.streamDurationFormatted)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(.orange)
+                        .shadow(color: .black, radius: 1, x: 1, y: 1)
+                }
+                
+                // Toplam yayın boyutu
+                HStack(spacing: 4) {
+                    Image(systemName: "externaldrive")
+                        .foregroundColor(.purple)
+                        .font(.caption2)
+                    Text("Boyut: \(vm.totalStreamMBFormatted)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(.purple)
+                        .shadow(color: .black, radius: 1, x: 1, y: 1)
+                }
+                
+                // Anlık bitrate
+                HStack(spacing: 4) {
+                    Image(systemName: "speedometer")
+                        .foregroundColor(.green)
+                        .font(.caption2)
+                    Text("Bitrate: \(String(format: "%.0f", vm.streamBitrateKbps)) kbps")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(.green)
+                        .shadow(color: .black, radius: 1, x: 1, y: 1)
+                }
+            }
+            
             // Sadece socket bağlıysa network stats göster
             if vm.isWebSocketConnected {
                 HStack(spacing: 8) {
@@ -272,9 +355,72 @@ struct MainView: View {
                 RTCVideoViewRepresentable(track: vm.client.localVideoTrack, onPinch: { scale in vm.onPinch(scale: scale) })
                     .ignoresSafeArea()
 
+                // Touch to Focus için ekran overlay'i
+                if !vm.overlayManager.isEditMode {
+                    Rectangle()
+                        .fill(Color.clear)
+                        .contentShape(Rectangle())
+                        .onTapGesture { location in
+                            // Dokunulan yerde manuel focus yap
+                            vm.setManualFocus(at: location)
+                        }
+                        .overlay(
+                            // Dokunulan yeri gösteren focus indicator
+                            vm.focusIndicatorLocation.map { location in
+                                ZStack {
+                                    // Dış halka
+                                    Circle()
+                                        .fill(Color.yellow.opacity(0.2))
+                                        .frame(width: 80, height: 80)
+                                    
+                                    // Orta halka
+                                    Circle()
+                                        .stroke(Color.yellow, lineWidth: 3)
+                                        .frame(width: 60, height: 60)
+                                    
+                                    // İç halka
+                                    Circle()
+                                        .fill(Color.yellow)
+                                        .frame(width: 8, height: 8)
+                                }
+                                .position(location)
+                                .animation(.easeInOut(duration: 0.3), value: location)
+                            }
+                        )
+                }
+                
+                // Otomatik Focus'a Dön butonu - sabit konumda, sadece manuel focus aktifken görünür
+                if !vm.overlayManager.isEditMode && vm.focusIndicatorLocation != nil {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                vm.enableAutoFocus()
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "target")
+                                        .font(.system(size: 14, weight: .bold))
+                                    Text("Otomatik Focus'a Dön")
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.blue.opacity(0.9))
+                                .cornerRadius(8)
+                                .shadow(color: .black.opacity(0.3), radius: 4, x: 2, y: 2)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .padding(.trailing, 20)
+                            .padding(.bottom, 20)
+                        }
+                    }
+                }
+                
                 if vm.overlaysShown {
                     ForEach(vm.overlayManager.widgets) { widget in
-                        DraggableResizableWidget(model: widget)
+                        DraggableResizableWidget(model: widget, overlayManager: vm.overlayManager)
                     }
                                     // Video overlays kaldırıldı - sadece web widgets destekleniyor
                 }
@@ -338,9 +484,9 @@ struct MainView: View {
             
             VideoQualityView(vm: vm, presets: presets)
             
-            CameraControlsView(vm: vm)
-            
             BitratePresetsView(vm: vm, bitratePresets: bitratePresets)
+            
+            CameraControlsView(vm: vm)
             
             OverlayWidgetsView(vm: vm)
             
@@ -441,7 +587,9 @@ struct CameraControlsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Kamera Kontrolleri").font(.subheadline).fontWeight(.semibold)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
+            
+            // Ana kamera kontrolleri
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
                 ControlButton(
                     icon: "camera.rotate.fill",
                     label: "Flip Camera",
@@ -455,6 +603,57 @@ struct CameraControlsView: View {
                     isSelected: !vm.micOn,
                     action: { vm.toggleMic() }
                 )
+                
+                ControlButton(
+                    icon: vm.torchOn ? "bolt.fill" : "bolt.fill",
+                    label: "Flash",
+                    isSelected: vm.torchOn,
+                    action: { vm.toggleTorch() }
+                )
+                
+                LensSelectionButton(vm: vm)
+                
+                
+            }
+            
+            // Lens seçimi
+            if vm.currentLens != .wide {
+                HStack {
+                    Text("Aktif Lens:")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(vm.currentLens.rawValue)
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .foregroundColor(.blue)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+            }
+            
+            // Stabilization Section
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Video Stabilization")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.secondary)
+                
+                if vm.supportedStabilizationModes.count > 1 {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 6) {
+                        ForEach(vm.supportedStabilizationModes) { mode in
+                            StabilizationButton(
+                                mode: mode,
+                                isSelected: vm.stabilizationMode == mode,
+                                action: { vm.setStabilizationMode(mode) }
+                            )
+                        }
+                    }
+                } else {
+                    Text("Stabilization desteklenmiyor")
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                        .padding(.horizontal, 8)
+                }
             }
         }
     }
@@ -485,7 +684,23 @@ struct OverlayWidgetsView: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            Toggle("Overlays", isOn: $vm.overlaysShown)
+            HStack {
+                Toggle("Overlays", isOn: $vm.overlaysShown)
+                
+                Spacer()
+                
+                Button(action: {
+                    vm.overlayManager.isEditMode.toggle()
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: vm.overlayManager.isEditMode ? "pencil.circle.fill" : "pencil.circle")
+                        Text("Edit")
+                    }
+                    .font(.caption)
+                    .foregroundColor(vm.overlayManager.isEditMode ? .orange : .blue)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
             
             VStack(spacing: 8) {
                 TextField("Widget başlığı (opsiyonel)", text: $vm.newWidgetTitle)
@@ -495,6 +710,81 @@ struct OverlayWidgetsView: View {
                     TextField("https://...", text: $vm.newWidgetURL)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                     Button("Add") { vm.addOverlayWidget() }
+                }
+            }
+            
+            // Manual focus durumu için auto focus butonu
+            if vm.overlayManager.isManualFocus {
+                Button(action: {
+                    vm.overlayManager.enableAutoFocus()
+                }) {
+                    HStack {
+                        Image(systemName: "scope")
+                        Text("Otomatik Focus'a Dön")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.green)
+                    .cornerRadius(6)
+                }
+            }
+            
+            // Eklenen overlay'lerin listesi
+            if !vm.overlayManager.widgets.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Mevcut Overlay'ler:")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                    
+                    ForEach(vm.overlayManager.widgets, id: \.id) { widget in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(widget.title.isEmpty ? "Başlıksız Widget" : widget.title)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.primary)
+                                
+                                Text(widget.urlString)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            
+                            Spacer()
+                            
+                            // Focus butonu (sadece manual focus kapalıyken)
+                            if !vm.overlayManager.isManualFocus {
+                                Button(action: {
+                                    vm.overlayManager.setManualFocus(widgetId: widget.id)
+                                }) {
+                                    Image(systemName: "target")
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                            
+                            Button(action: {
+                                vm.removeOverlayWidget(id: widget.id)
+                            }) {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            // Focused widget için farklı arka plan
+                            vm.overlayManager.focusedWidgetId == widget.id ? 
+                            Color.blue.opacity(0.2) : Color(.systemGray6)
+                        )
+                        .cornerRadius(6)
+                    }
                 }
             }
         }
@@ -788,5 +1078,71 @@ extension MainView {
         }
     }
 }
+
+struct LensSelectionButton: View {
+    @ObservedObject var vm: CallViewModel
+    @State private var showLensPicker = false
+    
+    var body: some View {
+        Menu {
+            ForEach(LensKind.allCases, id: \.self) { lens in
+                Button(action: {
+                    vm.setLens(lens)
+                }) {
+                    HStack {
+                        Image(systemName: lensIcon(for: lens))
+                        Text(lensDisplayName(for: lens))
+                        Spacer()
+                        if vm.lens == lens {
+                            Image(systemName: "checkmark")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                }
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(.body, design: .rounded, weight: .semibold))
+                    .foregroundColor(.primary)
+                
+                Text("Lens")
+                    .font(.system(.caption2, design: .rounded, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.systemGray6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color(.systemGray6).opacity(0.8), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .menuStyle(BorderlessButtonMenuStyle())
+    }
+    
+    private func lensIcon(for lens: LensKind) -> String {
+        switch lens {
+        case .wide: return "camera.aperture"
+        case .ultraWide: return "camera.filters"
+        case .tele: return "camera.metering.center"
+        }
+    }
+    
+    private func lensDisplayName(for lens: LensKind) -> String {
+        switch lens {
+        case .wide: return "Normal Lens"
+        case .ultraWide: return "Ultra Wide"
+        case .tele: return "Tele Lens"
+        }
+    }
+}
+
+
 
 

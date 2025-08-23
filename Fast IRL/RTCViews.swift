@@ -2,6 +2,21 @@ import SwiftUI
 import WebRTC
 import WebKit
 
+extension View {
+    @ViewBuilder
+    func `if`<TrueContent: View, FalseContent: View>(
+        _ condition: Bool,
+        if ifTransform: (Self) -> TrueContent,
+        else elseTransform: (Self) -> FalseContent
+    ) -> some View {
+        if condition {
+            ifTransform(self)
+        } else {
+            elseTransform(self)
+        }
+    }
+}
+
 struct RTCVideoViewRepresentable: UIViewRepresentable {
     class Wrapped: UIView {
         let v = RTCMTLVideoView()
@@ -42,6 +57,7 @@ struct RTCVideoViewRepresentable: UIViewRepresentable {
 
 struct WebViewRepresentable: UIViewRepresentable {
     let webView: WKWebView
+    let isEditMode: Bool
     
     func makeUIView(context: Context) -> WKWebView { 
         // WebView configuration ayarları
@@ -53,14 +69,38 @@ struct WebViewRepresentable: UIViewRepresentable {
         
         // WebView'a dokunma olaylarını engelle
         webView.scrollView.isUserInteractionEnabled = false
+        
+        // Edit modda değilken arkaplanı şeffaf yap
+        if !isEditMode {
+            webView.isOpaque = false
+            webView.backgroundColor = UIColor.clear
+            webView.scrollView.backgroundColor = UIColor.clear
+        } else {
+            webView.isOpaque = true
+            webView.backgroundColor = UIColor.black.withAlphaComponent(0.2)
+            webView.scrollView.backgroundColor = UIColor.black.withAlphaComponent(0.2)
+        }
+        
         return webView 
     }
     
-    func updateUIView(_ uiView: WKWebView, context: Context) { }
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        // Edit mod değiştiğinde arkaplan ayarlarını güncelle
+        if !isEditMode {
+            uiView.isOpaque = false
+            uiView.backgroundColor = UIColor.clear
+            uiView.scrollView.backgroundColor = UIColor.clear
+        } else {
+            uiView.isOpaque = true
+            uiView.backgroundColor = UIColor.black.withAlphaComponent(0.2)
+            uiView.scrollView.backgroundColor = UIColor.black.withAlphaComponent(0.2)
+        }
+    }
 }
 
 struct DraggableResizableWidget: View {
     @ObservedObject var model: OverlayWidgetModel
+    @ObservedObject var overlayManager: OverlayManager
     @GestureState private var dragOffset: CGSize = .zero
     @GestureState private var magnifyBy: CGFloat = 1.0
     @State private var resizing: Bool = false
@@ -68,14 +108,27 @@ struct DraggableResizableWidget: View {
     
     // Web view için aspect ratio (genelde 16:9)
     private let aspectRatio: CGFloat = 16.0 / 9.0
+    
+    // Edit mod kontrolü
+    private var shouldEnableInteraction: Bool {
+        overlayManager.isEditMode
+    }
 
     var body: some View {
-        WebViewRepresentable(webView: model.webView)
+        WebViewRepresentable(webView: model.webView, isEditMode: overlayManager.isEditMode)
             .frame(width: max(80, model.frame.width * lastScale * magnifyBy), height: max(60, model.frame.height * lastScale * magnifyBy))
-            .background(Color.black.opacity(0.2))
+            .background(
+                // Edit modda değilken arkaplanı şeffaf yap
+                overlayManager.isEditMode ? Color.black.opacity(0.2) : Color.clear
+            )
             .overlay(
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.7), lineWidth: 1)
+                    // Border - edit modunda turuncu, normal'de beyaz
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(
+                            overlayManager.isEditMode ? Color.orange.opacity(0.8) : Color.white.opacity(0.7),
+                            lineWidth: overlayManager.isEditMode ? 2 : 1
+                        )
                     
                     // Widget başlığı - sol üst köşede
                     if !model.title.isEmpty {
@@ -89,63 +142,78 @@ struct DraggableResizableWidget: View {
                             .position(x: 25, y: 15)
                     }
                     
-                    // Refresh butonu - sağ üst köşede
-                    Button(action: {
-                        model.webView.reload()
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 20, height: 20)
-                            .background(Color.blue.opacity(0.8))
-                            .clipShape(Circle())
+                    // Refresh butonu - sağ üst köşede (sadece edit modunda görünür)
+                    if overlayManager.isEditMode {
+                        Button(action: {
+                            model.webView.reload()
+                        }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 20, height: 20)
+                                .background(Color.blue.opacity(0.8))
+                                .clipShape(Circle())
+                        }
+                        .position(x: model.frame.width - 15, y: 15)
                     }
-                    .position(x: model.frame.width - 15, y: 15)
                     
-                    // Resize handles at corners - kutunun içinde
-                    ForEach(ResizeHandle.allCases, id: \.self) { handle in
-                        Circle()
-                            .fill(Color.white)
-                            .stroke(Color.gray, lineWidth: 1)
-                            .frame(width: 12, height: 12)
-                            .position(positionForHandle(handle, in: model.frame.size, scale: lastScale * magnifyBy))
-                            .gesture(DragGesture().onChanged { value in
-                                resizing = true
-                                applyResizeWithAspectRatio(from: handle, translation: value.translation)
-                            }.onEnded { _ in resizing = false })
+
+                    
+                    // Resize handles - sadece edit modunda görünür
+                    if overlayManager.isEditMode {
+                        ForEach(ResizeHandle.allCases, id: \.self) { handle in
+                            Circle()
+                                .fill(Color.orange)
+                                .stroke(Color.white, lineWidth: 1)
+                                .frame(width: 12, height: 12)
+                                .position(positionForHandle(handle, in: model.frame.size, scale: lastScale * magnifyBy))
+                                .gesture(DragGesture().onChanged { value in
+                                    resizing = true
+                                    applyResizeWithAspectRatio(from: handle, translation: value.translation)
+                                }.onEnded { _ in 
+                                    resizing = false
+                                    overlayManager.updateWidgetFrame(id: model.id, frame: model.frame)
+                                })
+                        }
                     }
                 }
             )
             .position(x: model.frame.midX + dragOffset.width, y: model.frame.midY + dragOffset.height)
             .scaleEffect(lastScale * magnifyBy)
-            .gesture(
-                SimultaneousGesture(
-                    DragGesture()
-                        .updating($dragOffset) { v, s, _ in
-                            if !resizing { s = v.translation }
-                        }
-                        .onEnded { v in 
-                            if !resizing {
-                                model.frame.origin.x += v.translation.width
-                                model.frame.origin.y += v.translation.height
+            .if(overlayManager.isEditMode) { view in
+                view.gesture(
+                    SimultaneousGesture(
+                        DragGesture()
+                            .updating($dragOffset) { v, s, _ in
+                                if !resizing { s = v.translation }
                             }
-                        },
-                    MagnificationGesture()
-                        .updating($magnifyBy) { currentState, gestureState, transaction in
-                            gestureState = currentState
-                        }
-                        .onEnded { value in
-                            lastScale *= value
-                            // Minimum ve maximum scale sınırları
-                            lastScale = max(0.5, min(lastScale, 3.0))
-                            // Frame'i güncelle
-                            let newWidth = model.frame.width * lastScale
-                            let newHeight = newWidth / aspectRatio
-                            model.frame.size = CGSize(width: newWidth, height: newHeight)
-                            lastScale = 1.0 // Reset scale factor
-                        }
+                            .onEnded { v in 
+                                if !resizing {
+                                    model.frame.origin.x += v.translation.width
+                                    model.frame.origin.y += v.translation.height
+                                    overlayManager.updateWidgetFrame(id: model.id, frame: model.frame)
+                                }
+                            },
+                        MagnificationGesture()
+                            .updating($magnifyBy) { currentState, gestureState, transaction in
+                                gestureState = currentState
+                            }
+                            .onEnded { value in
+                                lastScale *= value
+                                // Minimum ve maximum scale sınırları
+                                lastScale = max(0.5, min(lastScale, 3.0))
+                                // Frame'i güncelle
+                                let newWidth = model.frame.width * lastScale
+                                let newHeight = newWidth / aspectRatio
+                                model.frame.size = CGSize(width: newWidth, height: newHeight)
+                                lastScale = 1.0 // Reset scale factor
+                                overlayManager.updateWidgetFrame(id: model.id, frame: model.frame)
+                            }
+                    )
                 )
-            )
+            } else: { view in
+                view.allowsHitTesting(false) // Normal modda overlay'e dokunmayı devre dışı bırak
+            }
     }
 
     enum ResizeHandle: CaseIterable { case topLeft, topRight, bottomLeft, bottomRight }

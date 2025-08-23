@@ -5,6 +5,7 @@ import WebRTC
 protocol WebRTCClientDelegate: AnyObject {
     func webRTCClient(_ client: WebRTCClient, didGenerate candidate: RTCIceCandidate)
     func webRTCClient(_ client: WebRTCClient, didChangeConnectionState state: RTCPeerConnectionState)
+    func webRTCClient(_ client: WebRTCClient, didUpdateBitrate bitrateKbps: Double)
 }
 
 final class WebRTCClient: NSObject, ObservableObject {
@@ -205,6 +206,9 @@ final class WebRTCClient: NSObject, ObservableObject {
                     self.uploadSpeedKbps = uploadSpeedCalculated
                     self.downloadSpeedKbps = downloadSpeedCalculated
                     print("📊 UI updated - Upload: \(self.uploadSpeedKbps), Download: \(self.downloadSpeedKbps)")
+                    
+                    // Bitrate'i delegate'e gönder
+                    self.delegate?.webRTCClient(self, didUpdateBitrate: uploadSpeedCalculated)
                 }
             }
             

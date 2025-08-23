@@ -9,6 +9,26 @@ enum LensKind: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum StabilizationMode: String, CaseIterable, Identifiable {
+    case off = "Off"
+    case standard = "Standard"
+    case cinematic = "Cinematic"
+    case cinematicExtended = "Cinematic Extended"
+    case auto = "Auto"
+    
+    var id: String { rawValue }
+    
+    var avMode: AVCaptureVideoStabilizationMode {
+        switch self {
+        case .off: return .off
+        case .standard: return .standard
+        case .cinematic: return .cinematic
+        case .cinematicExtended: return .cinematicExtended
+        case .auto: return .auto
+        }
+    }
+}
+
 // CameraMode enum kaldırıldı - sadece single-cam modu destekleniyor
 
 final class CameraController: NSObject {
@@ -128,7 +148,11 @@ final class CameraController: NSObject {
     func switchPosition() {
         guard let dev = currentDevice else { return }
         let newPos: AVCaptureDevice.Position = dev.position == .front ? .back : .front
-        start(position: newPos, lens: .wide, width: 1280, height: 720, fps: currentFps) {
+        
+        // Mevcut lens ayarını sakla (varsayılan olarak .wide kullan)
+        let currentLens: LensKind = .wide
+        
+        start(position: newPos, lens: currentLens, width: 1280, height: 720, fps: currentFps) {
             // Ensure orientation is set after position switch
             if let connection = self.capturer.captureSession.outputs.first?.connection(with: .video) {
                 if connection.isVideoOrientationSupported {
@@ -163,6 +187,125 @@ final class CameraController: NSObject {
             dev.unlockForConfiguration()
         } catch { }
     }
+    
+    // MARK: - Video Stabilization
+    
+    func getSupportedStabilizationModes() -> [StabilizationMode] {
+        guard let connection = capturer.captureSession.outputs.first?.connection(with: .video) else {
+            return [.off]
+        }
+        
+        var supportedModes: [StabilizationMode] = [.off] // Off her zaman desteklenir
+        
+        if connection.isVideoStabilizationSupported {
+            // iOS'da tüm stabilization modları genellikle desteklenir
+            supportedModes.append(contentsOf: [.standard, .cinematic, .auto])
+            
+            // iOS 13+ için cinematicExtended kontrol et
+            if #available(iOS 13.0, *) {
+                supportedModes.append(.cinematicExtended)
+            }
+        }
+        
+        return supportedModes
+    }
+    
+    func getCurrentStabilizationMode() -> StabilizationMode {
+        guard let connection = capturer.captureSession.outputs.first?.connection(with: .video) else {
+            return .off
+        }
+        
+        let currentMode = connection.preferredVideoStabilizationMode
+        return StabilizationMode.allCases.first { $0.avMode == currentMode } ?? .off
+    }
+    
+    func setStabilizationMode(_ mode: StabilizationMode) {
+        guard let connection = capturer.captureSession.outputs.first?.connection(with: .video) else {
+            print("❌ Video connection bulunamadı")
+            return
+        }
+        
+        if !connection.isVideoStabilizationSupported && mode != .off {
+            print("❌ Video stabilization desteklenmiyor")
+            return
+        }
+        
+        // iOS 13+ için cinematicExtended kontrolü
+        if mode == .cinematicExtended {
+            if #available(iOS 13.0, *) {
+                connection.preferredVideoStabilizationMode = mode.avMode
+            } else {
+                print("❌ Cinematic Extended iOS 13+ gerektirir")
+                return
+            }
+        } else {
+            connection.preferredVideoStabilizationMode = mode.avMode
+        }
+        
+        print("✅ Stabilization modu ayarlandı: \(mode.rawValue)")
+    }
+    
+    // MARK: - Manual Focus
+    
+    func setManualFocus(at point: CGPoint) {
+        guard let deviceInput = capturer.captureSession.inputs.first as? AVCaptureDeviceInput else {
+            print("❌ Camera device bulunamadı")
+            return
+        }
+        
+        let device = deviceInput.device
+        
+        // Focus point'i normalize et (0.0 - 1.0 arası)
+        let normalizedPoint = CGPoint(
+            x: point.x / (capturer.captureSession.sessionPreset == .hd1920x1080 ? 1920 : 1280),
+            y: point.y / (capturer.captureSession.sessionPreset == .hd1920x1080 ? 1080 : 720)
+        )
+        
+        do {
+            try device.lockForConfiguration()
+            
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = normalizedPoint
+                device.focusMode = .autoFocus
+                print("🎯 Manuel focus ayarlandı: \(normalizedPoint)")
+            } else {
+                print("❌ Manuel focus desteklenmiyor")
+            }
+            
+            device.unlockForConfiguration()
+        } catch {
+            print("❌ Manuel focus ayarlanamadı: \(error)")
+        }
+    }
+    
+    func enableAutoFocus() {
+        guard let deviceInput = capturer.captureSession.inputs.first as? AVCaptureDeviceInput else {
+            print("❌ Camera device bulunamadı")
+            return
+        }
+        
+        let device = deviceInput.device
+        
+        do {
+            try device.lockForConfiguration()
+            
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+                print("🎯 Otomatik focus'a geçildi (Continuous Auto Focus)")
+            } else if device.isFocusModeSupported(.autoFocus) {
+                device.focusMode = .autoFocus
+                print("🎯 Otomatik focus'a geçildi (Auto Focus)")
+            } else {
+                print("❌ Otomatik focus desteklenmiyor")
+            }
+            
+            device.unlockForConfiguration()
+        } catch {
+            print("❌ Otomatik focus ayarlanamadı: \(error)")
+        }
+    }
+
+
 }
 
 

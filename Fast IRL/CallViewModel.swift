@@ -30,8 +30,114 @@ final class CallViewModel: ObservableObject {
     @Published var micOn = true
     @Published var torchOn = false
     @Published var position: AVCaptureDevice.Position = .back
-    @Published var lens: LensKind = .wide
+    // Her kamera pozisyonu için ayrı lens ayarları
+    @Published var backCameraLens: LensKind = .wide
+    @Published var frontCameraLens: LensKind = .wide
+    
+    // Focus indicator için
+    @Published var focusIndicatorLocation: CGPoint? = nil
+    
+    // Yayın süre takibi
+    @Published var streamStartTime: Date? = nil
+    @Published var streamDuration: TimeInterval = 0
+    private var streamTimer: Timer?
+    
+    // Yayın boyutu takibi
+    @Published var totalStreamBytes: Int64 = 0
+    @Published var streamBitrateKbps: Double = 0
+    private var lastBitrateUpdate: Date = Date()
+    private var bitrateUpdateTimer: Timer?
+    
+    // Computed property for current lens based on position
+    var lens: LensKind {
+        get {
+            return position == .back ? backCameraLens : frontCameraLens
+        }
+        set {
+            if position == .back {
+                backCameraLens = newValue
+            } else {
+                frontCameraLens = newValue
+            }
+        }
+    }
     @Published var zoomFactor: CGFloat = 1.0
+    @Published var stabilizationMode: StabilizationMode = .auto
+    @Published var supportedStabilizationModes: [StabilizationMode] = [.off]
+    
+
+    
+    // Computed property for UI
+    var currentLens: LensKind { lens }
+    
+    // MARK: - Stream Duration Tracking
+    
+    func startStreamTimer() {
+        streamStartTime = Date()
+        streamDuration = 0
+        
+        streamTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self, let startTime = self.streamStartTime else { return }
+            
+            // Main thread'de @Published property güncelle
+            DispatchQueue.main.async {
+                self.streamDuration = Date().timeIntervalSince(startTime)
+            }
+        }
+        
+        print("⏱️ Yayın süre takibi başlatıldı")
+    }
+    
+    func stopStreamTimer() {
+        streamTimer?.invalidate()
+        streamTimer = nil
+        streamStartTime = nil
+        streamDuration = 0
+        print("⏱️ Yayın süre takibi durduruldu")
+    }
+    
+    func resetStreamStats() {
+        totalStreamBytes = 0
+        streamBitrateKbps = 0
+        lastBitrateUpdate = Date()
+        print("📊 Yayın istatistikleri sıfırlandı")
+    }
+    
+    func updateStreamBitrate(_ currentBitrateKbps: Double) {
+        // Main thread'de @Published property güncelle
+        DispatchQueue.main.async {
+            self.streamBitrateKbps = currentBitrateKbps
+            
+            // Her saniye bitrate'i toplam boyuta ekle
+            let now = Date()
+            let timeDiff = now.timeIntervalSince(self.lastBitrateUpdate)
+            if timeDiff >= 1.0 {
+                let bytesThisSecond = Int64((currentBitrateKbps * 1000 * timeDiff) / 8) // kbps -> bytes
+                self.totalStreamBytes += bytesThisSecond
+                self.lastBitrateUpdate = now
+            }
+        }
+    }
+    
+    // MARK: - Computed Properties for UI
+    
+    var streamDurationFormatted: String {
+        let minutes = Int(streamDuration) / 60
+        let seconds = Int(streamDuration) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+    
+    var totalStreamMB: Double {
+        return Double(totalStreamBytes) / (1024 * 1024)
+    }
+    
+    var totalStreamMBFormatted: String {
+        if totalStreamMB >= 1024 {
+            return String(format: "%.1f GB", totalStreamMB / 1024)
+        } else {
+            return String(format: "%.1f MB", totalStreamMB)
+        }
+    }
 
     // Overlay widgets
     @Published var newWidgetURL: String = "https://example.org"
@@ -71,12 +177,20 @@ final class CallViewModel: ObservableObject {
             if isWebRTCConnected && !oldValue {
                 // WebRTC bağlantısı yeni başladı
                 stopWebRTCReconnectTimer()
+                
+                // Yayın timer'ını başlat
+                startStreamTimer()
+                resetStreamStats()
+                
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self.showOBSStartStreamAlert = true
                 }
             } else if !isWebRTCConnected && oldValue {
                 // WebRTC bağlantısı koptu
                 print("🔄 WebRTC bağlantısı koptu, yayın durduruluyor...")
+                
+                // Yayın timer'ını durdur
+                stopStreamTimer()
                 
                 // Yayını durdur
                 isPublishing = false
@@ -142,6 +256,17 @@ final class CallViewModel: ObservableObject {
         // Load saved widget URL
         if let savedWidgetURL = UserDefaults.standard.string(forKey: "newWidgetURL") {
             self.newWidgetURL = savedWidgetURL
+        }
+        
+        // Load saved stabilization mode
+        if let savedStabilization = UserDefaults.standard.string(forKey: "stabilizationMode"),
+           let mode = StabilizationMode(rawValue: savedStabilization) {
+            self.stabilizationMode = mode
+        }
+        
+        // Stabilization modlarını başlangıçta güncelle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            self.updateSupportedStabilizationModes()
         }
         
         // Load saved room ID
@@ -268,12 +393,20 @@ final class CallViewModel: ObservableObject {
                 cameraCapturer = capturer
                 let cam = CameraController(capturer: capturer)
                 camera = cam
-                cam.start(position: position, lens: lens, width: selectedPreset.w, height: selectedPreset.h, fps: selectedPreset.fps)
+                cam.start(position: position, lens: lens, width: selectedPreset.w, height: selectedPreset.h, fps: selectedPreset.fps) {
+                    // Update stabilization after camera starts
+                    self.updateSupportedStabilizationModes()
+                    cam.setStabilizationMode(self.stabilizationMode)
+                }
             }
         }
         
         // Use normal landscape format with proper orientation lock
         client.adaptOutputFormat(width: selectedPreset.w, height: selectedPreset.h, fps: selectedPreset.fps)
+        
+        // Stabilization modlarını hemen güncelle (kamera başlamadan önce)
+        updateStabilizationModesEarly()
+        
         isSetupInProgress = false
     }
     
@@ -290,7 +423,11 @@ final class CallViewModel: ObservableObject {
             cameraCapturer = capturer
             let cam = CameraController(capturer: capturer)
             camera = cam
-            cam.start(position: position, lens: lens, width: selectedPreset.w, height: selectedPreset.h, fps: selectedPreset.fps)
+            cam.start(position: position, lens: lens, width: selectedPreset.w, height: selectedPreset.h, fps: selectedPreset.fps) {
+                // Update stabilization after camera starts
+                self.updateSupportedStabilizationModes()
+                cam.setStabilizationMode(self.stabilizationMode)
+            }
         }
     }
     
@@ -343,6 +480,8 @@ final class CallViewModel: ObservableObject {
     }
 
     func toggleTorch() { torchOn.toggle(); camera?.setTorch(on: torchOn) }
+    
+
 
     func switchCameraPosition() { 
         // Prevent camera switch during setup to avoid race conditions
@@ -350,13 +489,107 @@ final class CallViewModel: ObservableObject {
             print("⚠️ Cannot switch camera during setup")
             return
         }
-        camera?.switchPosition(); 
-        position = (position == .back) ? .front : .back 
+        
+        // Hedef pozisyonu belirle
+        let newPosition: AVCaptureDevice.Position = (position == .back) ? .front : .back
+        
+        // Hedef pozisyon için lens ayarını al
+        let targetLens: LensKind = newPosition == .back ? backCameraLens : frontCameraLens
+        
+        print("📷 Kamera değiştiriliyor: \(position == .back ? "Back" : "Front") → \(newPosition == .back ? "Back" : "Front"), Lens: \(targetLens.rawValue)")
+        
+        // Pozisyonu güncelle
+        position = newPosition
+        
+        // Kamerayı hedef lens ile başlat
+        camera?.start(position: newPosition, lens: targetLens, width: 1280, height: 720, fps: camera?.currentFps ?? 60)
     }
 
-    func setLens(_ l: LensKind) { lens = l; camera?.switchLens(l) }
+    func setLens(_ l: LensKind) { 
+        // Lens ayarını mevcut kamera pozisyonuna kaydet
+        if position == .back {
+            backCameraLens = l
+        } else {
+            frontCameraLens = l
+        }
+        
+        // Kamerada lens'i değiştir
+        camera?.switchLens(l)
+        
+        print("📷 Lens değiştirildi: \(l.rawValue) (Pozisyon: \(position == .back ? "Back" : "Front"))")
+    }
+    
+    // Manuel focus fonksiyonu
+    func setManualFocus(at location: CGPoint) {
+        print("🎯 Manuel focus ayarlanıyor: \(location)")
+        
+        // Focus indicator'ı güncelle
+        focusIndicatorLocation = location
+        
+        // Camera controller'a focus komutu gönder
+        camera?.setManualFocus(at: location)
+        
+        // 3 saniye sonra focus indicator'ı gizle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            self.focusIndicatorLocation = nil
+        }
+    }
+    
+    func enableAutoFocus() {
+        print("🎯 Otomatik focus'a geçiliyor...")
+        
+        // Focus indicator'ı gizle
+        focusIndicatorLocation = nil
+        
+        // Camera controller'a otomatik focus komutu gönder
+        camera?.enableAutoFocus()
+    }
+    
+    func cycleLens() {
+        let lenses: [LensKind] = [.wide, .ultraWide, .tele]
+        if let currentIndex = lenses.firstIndex(of: lens) {
+            let nextIndex = (currentIndex + 1) % lenses.count
+            let nextLens = lenses[nextIndex]
+            setLens(nextLens)
+        }
+    }
 
     func onPinch(scale: CGFloat) { zoomFactor *= scale; camera?.setZoom(factor: zoomFactor) }
+    
+
+    
+    func setStabilizationMode(_ mode: StabilizationMode) {
+        stabilizationMode = mode
+        camera?.setStabilizationMode(mode)
+        // Save to UserDefaults
+        UserDefaults.standard.set(mode.rawValue, forKey: "stabilizationMode")
+    }
+    
+    func updateSupportedStabilizationModes() {
+        if let camera = camera {
+            supportedStabilizationModes = camera.getSupportedStabilizationModes()
+            
+            // Update current mode if not supported
+            if !supportedStabilizationModes.contains(stabilizationMode) {
+                stabilizationMode = supportedStabilizationModes.first ?? .off
+            }
+        }
+    }
+    
+    // Stabilization modlarını erken güncelle (kamera başlamadan önce)
+    private func updateStabilizationModesEarly() {
+        // Eğer kamera zaten varsa, stabilization modlarını hemen güncelle
+        if let camera = camera {
+            DispatchQueue.main.async {
+                self.updateSupportedStabilizationModes()
+            }
+        } else {
+            // Kamera henüz yoksa, kısa bir süre sonra tekrar dene
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.updateStabilizationModesEarly()
+            }
+        }
+    }
 
     func setMaxBitrate(_ kbps: Double) { 
         maxBitrateKbps = kbps; 
@@ -449,6 +682,9 @@ final class CallViewModel: ObservableObject {
         
         // WebRTC reconnect timer'ını durdur (manuel disconnect)
         stopWebRTCReconnectTimer()
+        
+        // Yayın timer'ını durdur
+        stopStreamTimer()
         
         // Her şeyi tamamen resetle
         isPublishing = false
@@ -614,6 +850,12 @@ extension CallViewModel: WebRTCClientDelegate {
             }
             
             print("🔗 WebRTC Connection UI updated: \(stateDescription)")
+        }
+    }
+    
+    func webRTCClient(_ client: WebRTCClient, didUpdateBitrate bitrateKbps: Double) {
+        DispatchQueue.main.async {
+            self.updateStreamBitrate(bitrateKbps)
         }
     }
     

@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fast IRL - Yayın İzle</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000 !important;
+            overflow: hidden !important;
+            font-family: Arial, sans-serif;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            min-width: 100vw !important;
+            min-height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+        }
+        
+        html {
+            overflow: hidden !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            min-width: 100vw !important;
+            min-height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+        }
+        
+        #videoContainer {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            z-index: 0;
+            min-width: 100vw !important;
+            min-height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+        }
+        
+        #remoteVideo {
+            width: 100vw !important;
+            height: 100vh !important;
+            background: #000;
+            display: block;
+            object-fit: contain !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            z-index: 1;
+            min-width: 100vw !important;
+            min-height: 100vh !important;
+            max-width: 100vw !important;
+            max-height: 100vh !important;
+        }
+        
+        #remoteVideo.hidden {
+            /* Video elementini hiç gizleme */
+        }
+        
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            z-index: 10;
+        }
+        
+        .loading {
+            background: transparent;
+        }
+        
+        .error {
+            background: transparent;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #333;
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .status-bar {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            z-index: 100;
+            font-family: monospace;
+        }
+        
+
+
+    </style>
+</head>
+<body>
+    <div id="videoContainer">
+        <video id="remoteVideo" autoplay playsinline muted style="width: 100vw !important; height: 100vh !important; object-fit: contain !important; position: fixed !important; top: 0 !important; left: 0 !important;"></video>
+        
+        <div id="loadingOverlay" class="overlay loading">
+            <div class="spinner"></div>
+            <span>Yayın yükleniyor...</span>
+        </div>
+        
+        <div id="errorOverlay" class="overlay error hidden">
+            <span>Bağlantı hatası! Otomatik yeniden bağlanılıyor...</span>
+        </div>
+    </div>
+    
+    <div id="statusBar" class="status-bar">
+        <div>WebSocket: <span id="wsStatus">Bağlanıyor...</span></div>
+        <div>WebRTC: <span id="rtcStatus">Bekleniyor...</span></div>
+        <div>Video: <span id="videoStatus">Yok</span></div>
+    </div>
+    
+
+
+    <script>
+        // WebRTC ve WebSocket değişkenleri
+        let peerConnection;
+        let webSocket;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        let reconnectTimer = null;
+        let connectionCheckInterval = null;
+        let lastVideoTime = 0;
+        let isRefreshing = false; // Sayfa yenileniyor flag'i
+        
+        // DOM elementleri
+        const remoteVideo = document.getElementById('remoteVideo');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const errorOverlay = document.getElementById('errorOverlay');
+
+        const wsStatus = document.getElementById('wsStatus');
+        const rtcStatus = document.getElementById('rtcStatus');
+        const videoStatus = document.getElementById('videoStatus');
+        
+        // Status güncelle
+        function updateStatus(element, status, color = 'white') {
+            element.textContent = status;
+            element.style.color = color;
+        }
+        
+        // Yükleme göster
+        function showLoading() {
+            loadingOverlay.classList.remove('hidden');
+            errorOverlay.classList.add('hidden');
+        }
+        
+        // Hata göster
+        function showError(message) {
+            errorOverlay.querySelector('span').textContent = message;
+            errorOverlay.classList.remove('hidden');
+            loadingOverlay.classList.add('hidden');
+            
+            // 5 saniye sonra sayfayı otomatik refresh et
+            setTimeout(() => {
+                console.log('🔄 Hata durumunda sayfa otomatik yenileniyor...');
+                updateStatus(wsStatus, 'Sayfa Yenileniyor...', '#FFA500');
+                
+                // Refresh flag'ini set et
+                isRefreshing = true;
+                
+                // Tüm bağlantıları ve monitoring'i durdur
+                stopConnectionMonitoring();
+                cleanupConnections();
+                
+                location.reload();
+            }, 10000);
+        }
+        
+        // Overlayları gizle
+        function hideOverlays() {
+            loadingOverlay.classList.add('hidden');
+            errorOverlay.classList.add('hidden');
+        }
+        
+        // Video elementini gizle ve temizle
+        function hideVideo() {
+            remoteVideo.srcObject = null;
+            remoteVideo.src = '';
+            remoteVideo.load();
+            updateStatus(videoStatus, 'Yok', '#FF6B6B');
+        }
+        
+        // Video elementini göster
+        function showVideo() {
+            remoteVideo.classList.remove('hidden');
+            updateStatus(videoStatus, 'Aktif', '#4ECDC4');
+        }
+        
+        // Video'yu basit şekilde oynat
+        function forceVideoPlay() {
+            remoteVideo.play();
+        }
+        
+        // Bağlantı durumunu kontrol et
+        function startConnectionMonitoring() {
+            if (connectionCheckInterval) {
+                clearInterval(connectionCheckInterval);
+            }
+            
+            connectionCheckInterval = setInterval(() => {
+                // Video stream kontrolü
+                if (remoteVideo.srcObject && remoteVideo.srcObject.active) {
+                    const videoTrack = remoteVideo.srcObject.getVideoTracks()[0];
+                    if (videoTrack && videoTrack.readyState === 'live') {
+                        lastVideoTime = Date.now();
+                        updateStatus(videoStatus, 'Aktif', '#4ECDC4');
+                    } else {
+                        updateStatus(videoStatus, 'Kopuk', '#FFA500');
+                    }
+                } else {
+                    updateStatus(videoStatus, 'Yok', '#FFA500');
+                }
+                
+                // WebRTC bağlantı durumu kontrolü
+                if (peerConnection) {
+                    updateStatus(rtcStatus, peerConnection.connectionState, 
+                        peerConnection.connectionState === 'connected' ? '#4ECDC4' : 
+                        peerConnection.connectionState === 'connecting' ? '#FFA500' : '#FF6B6B');
+                }
+                
+                // Video stream 10 saniye boyunca gelmiyorsa sayfa yenileniyor...
+                // if (lastVideoTime > 0 && (Date.now() - lastVideoTime) > 10000) {
+                //     console.log('⚠️ Video stream 10 saniye boyunca gelmedi, sayfa yenileniyor...');
+                //     updateStatus(videoStatus, 'Kopuk - Sayfa Yenileniyor', '#FFA500');
+                //     updateStatus(wsStatus, 'Sayfa Yenileniyor...', '#FFA500');
+                    
+                //     // Refresh flag'ini set et
+                //     isRefreshing = true;
+                    
+                //     // Tüm bağlantıları ve monitoring'i durdur
+                //     stopConnectionMonitoring();
+                //     cleanupConnections();
+                //     goToWaitingMode();
+                //     // 3 saniye sonra sayfayı refresh et
+                //     // setTimeout(() => {
+                //     //     location.reload();
+                //     // }, 3000);
+                // }
+                
+                // // Video stream tamamen yoksa ve 15 saniye geçtiyse sayfa yenileniyor...
+                // if (!remoteVideo.srcObject && (Date.now() - lastVideoTime) > 15000 && lastVideoTime > 0) {
+                //     console.log('📺 Video stream yok, sayfa yenileniyor...');
+                //     updateStatus(videoStatus, 'Yok - Sayfa Yenileniyor', '#FFA500');
+                //     updateStatus(wsStatus, 'Sayfa Yenileniyor...', '#FFA500');
+                    
+                //     // Refresh flag'ini set et
+                //     isRefreshing = true;
+                    
+                //     // Tüm bağlantıları ve monitoring'i durdur
+                //     stopConnectionMonitoring();
+                //     cleanupConnections();
+                //     goToWaitingMode();
+                    
+                //     // 2 saniye sonra sayfayı refresh et
+                //     // setTimeout(() => {
+                //     //     location.reload();
+                //     // }, 2000);
+                // }
+            }, 5000); // Her 5 saniyede bir kontrol et
+        }
+        
+        // Beklemeye geç
+        function goToWaitingMode() {
+            console.log('⏳ Bekleme moduna geçiliyor...');
+            hideVideo();
+            showLoading();
+            updateStatus(videoStatus, 'Yayın Bekleniyor', '#FFA500');
+            updateStatus(rtcStatus, 'Bekleniyor', '#FFA500');
+            
+            // 8 saniye sonra sayfa otomatik refresh et
+            setTimeout(() => {
+                if (!remoteVideo.srcObject) {
+                    console.log('🔄 Bekleme modunda sayfa otomatik yenileniyor...');
+                    updateStatus(wsStatus, 'Sayfa Yenileniyor...', '#FFA500');
+                    
+                    // Refresh flag'ini set et
+                    isRefreshing = true;
+                    
+                    // Tüm bağlantıları ve monitoring'i durdur
+                    stopConnectionMonitoring();
+                    cleanupConnections();
+                    
+                    location.reload();
+                }
+            }, 15000);
+        }
+        
+        // Yayın bittiğinde çağrılır
+        function onStreamEnded() {
+            console.log('📺 Yayın bitti, beklemeye geçiliyor...');
+            lastVideoTime = 0; // Video zamanını sıfırla
+            // goToWaitingMode();
+        }
+        
+        // Bağlantı izlemeyi durdur
+        function stopConnectionMonitoring() {
+            if (connectionCheckInterval) {
+                clearInterval(connectionCheckInterval);
+                connectionCheckInterval = null;
+            }
+        }
+        
+        // Tüm bağlantıları temizle
+        function cleanupConnections() {
+            console.log('🧹 Tüm bağlantılar temizleniyor...');
+            
+            // WebSocket'i temizle
+            if (webSocket) {
+                console.log('🔌 WebSocket temizleniyor...');
+                webSocket.onclose = null;
+                webSocket.onerror = null;
+                webSocket.onmessage = null;
+                webSocket.onopen = null;
+                webSocket.close();
+                webSocket = null;
+            }
+            
+            // PeerConnection'ı temizle
+            if (peerConnection) {
+                console.log('🔌 PeerConnection temizleniyor...');
+                peerConnection.onicecandidate = null;
+                peerConnection.ontrack = null;
+                peerConnection.onconnectionstatechange = null;
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            // Timer'ları temizle
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            
+            if (connectionCheckInterval) {
+                clearInterval(connectionCheckInterval);
+                connectionCheckInterval = null;
+            }
+            
+            // Sayaçları sıfırla
+            reconnectAttempts = 0;
+            lastVideoTime = 0;
+            
+            // Video'yu temizle
+            hideVideo();
+            
+            console.log('✅ Tüm bağlantılar temizlendi');
+        }
+        
+        // WebSocket bağlantısını kur
+        function connectWebSocket() {
+            try {
+                // Eğer sayfa yenileniyorsa yeni bağlantı kurma
+                if (isRefreshing) {
+                    console.log('⚠️ Sayfa yenileniyor, yeni bağlantı kurulmuyor');
+                    return;
+                }
+                
+                // Önce mevcut bağlantıları tamamen temizle
+                cleanupConnections();
+                
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `ws://173.249.21.219:8080`;
+                
+                console.log('🔗 WebSocket bağlanıyor:', wsUrl);
+                updateStatus(wsStatus, 'Bağlanıyor...', '#FFA500');
+                
+                webSocket = new WebSocket(wsUrl);
+                
+                webSocket.onopen = function() {
+                    console.log('✅ WebSocket bağlandı');
+                    updateStatus(wsStatus, 'Bağlı', '#4ECDC4');
+                    reconnectAttempts = 0;
+                    
+                    // PeerConnection'ı yeniden oluştur
+                    if (peerConnection) {
+                        console.log('🔌 Mevcut PeerConnection kapatılıyor...');
+                        peerConnection.close();
+                        peerConnection = null;
+                    }
+                    
+                    createPeerConnection();
+                };
+                
+                webSocket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('📨 WebSocket mesajı:', data.type);
+                        handleWebSocketMessage(data);
+                    } catch (error) {
+                        console.error('❌ WebSocket mesaj parse hatası:', error);
+                    }
+                };
+                
+                webSocket.onclose = function(event) {
+                    console.log('❌ WebSocket bağlantısı kesildi - Kod:', event.code, 'Sebep:', event.reason);
+                    updateStatus(wsStatus, 'Kopuk', '#FF6B6B');
+                    hideVideo();
+                    
+                    // WebSocket koptuğunda 8 saniye bekle, sonra sayfayı refresh et
+                    setTimeout(() => {
+                        if (!webSocket || webSocket.readyState !== WebSocket.OPEN) {
+                            console.log('🔌 WebSocket bağlantısı koptu, sayfa yenileniyor...');
+                            updateStatus(wsStatus, 'Sayfa Yenileniyor...', '#FFA500');
+                            
+                            // Refresh flag'ini set et
+                            isRefreshing = true;
+                            
+                            // Tüm bağlantıları ve monitoring'i durdur
+                            stopConnectionMonitoring();
+                            cleanupConnections();
+                            
+                            // location.reload();
+                        }
+                    }, 15000);
+                    
+                    attemptReconnect();
+                };
+                
+                webSocket.onerror = function(error) {
+                    console.error('❌ WebSocket hatası:', error);
+                    updateStatus(wsStatus, 'Hata', '#FF6B6B');
+                    hideVideo();
+                };
+                
+            } catch (error) {
+                console.error('❌ WebSocket bağlantı hatası:', error);
+                updateStatus(wsStatus, 'Hata', '#FF6B6B');
+                showError('WebSocket bağlantı hatası: ' + error.message);
+            }
+        }
+        
+        // WebSocket yeniden bağlanma
+        function attemptReconnect() {
+            // Eğer sayfa yenileniyorsa yeni bağlantı kurma
+            if (isRefreshing) {
+                console.log('⚠️ Sayfa yenileniyor, otomatik reconnect yapılmıyor');
+                return;
+            }
+            
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                console.log(`🔄 Yeniden bağlanma denemesi ${reconnectAttempts}/${maxReconnectAttempts}`);
+                
+                const delay = Math.min(2000 * reconnectAttempts, 10000); // Max 10 saniye
+                updateStatus(wsStatus, `Yeniden Bağlanılıyor (${reconnectAttempts}/${maxReconnectAttempts})`, '#FFA500');
+                
+                if (reconnectTimer) {
+                    clearTimeout(reconnectTimer);
+                }
+                
+                reconnectTimer = setTimeout(() => {
+                    connectWebSocket();
+                }, delay);
+            } else {
+                console.log('❌ Maksimum yeniden bağlanma denemesi aşıldı, sayfa yenileniyor...');
+                updateStatus(wsStatus, 'Sayfa Yenileniyor...', '#FFA500');
+                
+                // 5 saniye sonra sayfayı refresh et
+                setTimeout(() => {
+                    console.log('🔄 Maksimum deneme aşıldı, sayfa yenileniyor...');
+                    updateStatus(wsStatus, 'Sayfa Yenileniyor...', '#FFA500');
+                    
+                    // Refresh flag'ini set et
+                    isRefreshing = true;
+                    
+                    // Tüm bağlantıları ve monitoring'i durdur
+                    stopConnectionMonitoring();
+                    cleanupConnections();
+                    
+                    location.reload();
+                }, 10000);
+            }
+        }
+        
+        // Manuel yeniden bağlanma
+        function manualReconnect() {
+            console.log('🔄 Manuel yeniden bağlanma başlatılıyor');
+            
+            // Eğer sayfa yenileniyorsa yeni bağlantı kurma
+            if (isRefreshing) {
+                console.log('⚠️ Sayfa yenileniyor, manuel reconnect yapılmıyor');
+                return;
+            }
+            
+            // Önce mevcut bağlantıları tamamen temizle
+            cleanupConnections();
+            
+            // Loading göster
+            showLoading();
+            
+            // Status'ları güncelle
+            updateStatus(wsStatus, 'Yeniden Bağlanılıyor...', '#FFA500');
+            updateStatus(rtcStatus, 'Bekleniyor', '#FFA500');
+            updateStatus(videoStatus, 'Yok', '#FFA500');
+            
+            // Kısa bir gecikme ile WebSocket'i yeniden başlat
+            setTimeout(() => {
+                console.log('🔄 WebSocket yeniden başlatılıyor...');
+                connectWebSocket();
+            }, 2000);
+        }
+        
+        // WebSocket mesajlarını işle
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'welcome':
+                    console.log('👋 Sunucuya bağlandı');
+                    break;
+                    
+                case 'offer':
+                    console.log('📨 Offer alındı');
+                    handleOffer(data.offer);
+                    break;
+                    
+                case 'answer':
+                    console.log('📨 Answer alındı');
+                    handleAnswer(data.answer);
+                    break;
+                    
+                case 'ice-candidate':
+                    console.log('📨 ICE candidate alındı');
+                    handleIceCandidate(data.candidate);
+                    break;
+                    
+                default:
+                    console.log('⚠️ Bilinmeyen mesaj tipi:', data.type);
+            }
+        }
+        
+        // RTCPeerConnection oluştur
+        function createPeerConnection() {
+            try {
+                // Eğer zaten bir PeerConnection varsa, önce onu kapat
+                if (peerConnection) {
+                    console.log('🔌 Mevcut PeerConnection kapatılıyor...');
+                    peerConnection.close();
+                    peerConnection = null;
+                }
+                
+                console.log('🔄 Yeni PeerConnection oluşturuluyor...');
+                peerConnection = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                });
+                
+                peerConnection.onicecandidate = function(event) {
+                    if (event.candidate) {
+                        console.log('📤 ICE candidate gönderiliyor');
+                        sendMessage({
+                            type: 'ice-candidate',
+                            candidate: event.candidate
+                        });
+                    }
+                };
+                
+                peerConnection.ontrack = function(event) {
+                    console.log('📺 Video stream alındı');
+                    remoteVideo.srcObject = event.streams[0];
+                    lastVideoTime = Date.now();
+                    
+                    // Ses seviyesini kontrol et
+                    if (remoteVideo.srcObject) {
+                        const audioTracks = remoteVideo.srcObject.getAudioTracks();
+                        console.log('🔊 Audio tracks:', audioTracks.length);
+                        audioTracks.forEach(track => {
+                            console.log('🔊 Audio track:', track.kind, 'enabled:', track.enabled, 'readyState:', track.readyState);
+                        });
+                        
+                        // Video track'lerin durumunu izle
+                        const videoTracks = remoteVideo.srcObject.getVideoTracks();
+                        videoTracks.forEach(track => {
+                            track.onended = function() {
+                                console.log('📺 Video track bitti');
+                                onStreamEnded();
+                            };
+                            
+                            track.onmute = function() {
+                                console.log('📺 Video track sessize alındı');
+                            };
+                            
+                            track.onunmute = function() {
+                                console.log('📺 Video track sesi açıldı');
+                            };
+                        });
+                    }
+                    
+                    // Video'yu basit şekilde oynat
+                    remoteVideo.play();
+                    
+                    // Video elementini göster
+                    showVideo();
+                    hideOverlays();
+                    
+                    // Video elementini göster
+                    remoteVideo.style.display = 'block';
+                    
+                    // 3 saniye sonra sesi otomatik aç
+                    setTimeout(() => {
+                        // Ses açmayı dene
+                        remoteVideo.muted = false;
+                        console.log('🔊 Video sesi 3 saniye sonra otomatik açıldı');
+                    }, 3000);
+                    
+                    // Video elementinin görünür olduğunu log'la
+                    console.log('🎥 Video element görünür:', !remoteVideo.classList.contains('hidden'));
+                    console.log('🎥 Video boyutları:', remoteVideo.offsetWidth, 'x', remoteVideo.offsetHeight);
+                    console.log('🎥 Video srcObject:', remoteVideo.srcObject);
+                    console.log('🎥 Video readyState:', remoteVideo.readyState);
+                    console.log('🎥 Video computed style:', window.getComputedStyle(remoteVideo));
+                };
+                
+                peerConnection.onconnectionstatechange = function() {
+                    console.log('🔗 Bağlantı durumu:', peerConnection.connectionState);
+                    updateStatus(rtcStatus, peerConnection.connectionState, 
+                        peerConnection.connectionState === 'connected' ? '#4ECDC4' : 
+                        peerConnection.connectionState === 'connecting' ? '#FFA500' : '#FF6B6B');
+                    
+                    if (peerConnection.connectionState === 'failed' || 
+                        peerConnection.connectionState === 'disconnected') {
+                        hideVideo();
+                        updateStatus(videoStatus, 'Kopuk', '#FFA500');
+                        
+                        // Bağlantı koptuğunda 6 saniye bekle, sonra sayfayı refresh et
+                        setTimeout(() => {
+                            if (peerConnection.connectionState !== 'connected') {
+                                console.log('🔗 WebRTC bağlantısı koptu, sayfa yenileniyor...');
+                                updateStatus(wsStatus, 'Sayfa Yenileniyor...', '#FFA500');
+                                
+                                // Refresh flag'ini set et
+                                isRefreshing = true;
+                                
+                                // Tüm bağlantıları ve monitoring'i durdur
+                                stopConnectionMonitoring();
+                                cleanupConnections();
+                                
+                                location.reload();
+                            }
+                        }, 12000);
+                    }
+                };
+                
+                console.log('✅ PeerConnection oluşturuldu');
+                
+            } catch (error) {
+                console.error('❌ PeerConnection oluşturma hatası:', error);
+                showError('PeerConnection hatası: ' + error.message);
+            }
+        }
+        
+        // Offer işle
+        async function handleOffer(offer) {
+            try {
+                console.log('📥 Offer işleniyor');
+                
+                // Offer string ise parse et
+                let offerDesc;
+                if (typeof offer === 'string') {
+                    offerDesc = new RTCSessionDescription({
+                        type: 'offer',
+                        sdp: offer
+                    });
+                } else {
+                    offerDesc = new RTCSessionDescription(offer);
+                }
+                
+                console.log('📄 SDP içeriği:', offerDesc.sdp.substring(0, 100) + '...');
+                
+                await peerConnection.setRemoteDescription(offerDesc);
+                console.log('✅ Remote description set edildi');
+                
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                sendMessage({
+                    type: 'answer',
+                    answer: answer
+                });
+                
+                console.log('📤 Answer gönderildi');
+                
+            } catch (error) {
+                console.error('❌ Offer işleme hatası:', error);
+                showError('Offer işleme hatası: ' + error.message);
+            }
+        }
+        
+        // Answer işle
+        async function handleAnswer(answer) {
+            try {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                console.log('✅ Answer işlendi');
+            } catch (error) {
+                console.error('❌ Answer işleme hatası:', error);
+            }
+        }
+        
+        // ICE Candidate işle
+        async function handleIceCandidate(candidate) {
+            try {
+                // Candidate string ise parse et
+                let iceCandidate;
+                if (typeof candidate === 'string') {
+                    iceCandidate = new RTCIceCandidate(JSON.parse(candidate));
+                } else {
+                    iceCandidate = new RTCIceCandidate(candidate);
+                }
+                
+                await peerConnection.addIceCandidate(iceCandidate);
+                console.log('✅ ICE candidate eklendi');
+            } catch (error) {
+                console.error('❌ ICE candidate hatası:', error);
+            }
+        }
+        
+        // WebSocket mesajı gönder
+        function sendMessage(message) {
+            if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+                try {
+                    webSocket.send(JSON.stringify(message));
+                    console.log('📤 Mesaj gönderildi:', message.type);
+                } catch (error) {
+                    console.error('❌ Mesaj gönderme hatası:', error);
+                    // Mesaj gönderilemezse WebSocket'i yeniden başlat
+                    setTimeout(() => {
+                        console.log('🔄 Mesaj gönderilemedi, WebSocket yeniden başlatılıyor...');
+                        manualReconnect();
+                    }, 2000);
+                }
+            } else {
+                console.warn('⚠️ WebSocket bağlantısı yok veya kapalı, mesaj gönderilemedi:', message.type);
+                // WebSocket kapalıysa yeniden bağlanmayı dene
+                if (!webSocket || webSocket.readyState !== WebSocket.OPEN) {
+                    setTimeout(() => {
+                        console.log('🔄 WebSocket kapalı, yeniden bağlanmayı deniyor...');
+                        manualReconnect();
+                    }, 1000);
+                }
+            }
+        }
+        
+        // Sayfa yüklendiğinde başlat
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Uygulama başlatılıyor');
+            
+            // Önce mevcut bağlantıları temizle
+            cleanupConnections();
+            
+            // Video elementini her zaman görünür yap
+            remoteVideo.style.display = 'block';
+            
+            // Video ended event listener ekle
+            remoteVideo.addEventListener('ended', function() {
+                console.log('📺 Video oynatma bitti');
+                onStreamEnded();
+            });
+            
+            // Video error event listener ekle
+            remoteVideo.addEventListener('error', function(e) {
+                console.error('❌ Video hatası:', e);
+                onStreamEnded();
+            });
+            
+
+            
+            showLoading();
+            connectWebSocket();
+            startConnectionMonitoring();
+        });
+        
+        // Sayfa kapatılırken temizle
+        window.addEventListener('beforeunload', function() {
+            stopConnectionMonitoring();
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+            }
+            if (peerConnection) {
+                peerConnection.close();
+            }
+            if (webSocket) {
+                webSocket.close();
+            }
+        });
+        
+        // Sayfa görünürlük değişikliği
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden && !webSocket) {
+                console.log('🔄 Sayfa tekrar görünür, bağlantı kontrol ediliyor');
+                if (webSocket && webSocket.readyState !== WebSocket.OPEN) {
+                    manualReconnect();
+                }
+            }
+        });
+        
+        // Online/offline durumu
+        window.addEventListener('online', function() {
+            console.log('🌐 İnternet bağlantısı geri geldi');
+            if (!webSocket || webSocket.readyState !== WebSocket.OPEN) {
+                manualReconnect();
+            }
+        });
+        
+        window.addEventListener('offline', function() {
+            console.log('🌐 İnternet bağlantısı kesildi');
+            updateStatus(wsStatus, 'İnternet Yok', '#FF6B6B');
+            updateStatus(rtcStatus, 'Bağlantı Yok', '#FF6B6B');
+        });
+    </script>
+</body>
+</html>

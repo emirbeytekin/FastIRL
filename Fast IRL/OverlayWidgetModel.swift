@@ -51,6 +51,9 @@ final class OverlayWidgetModel: ObservableObject, Identifiable {
 
 final class OverlayManager: ObservableObject {
     @Published var widgets: [OverlayWidgetModel] = []
+    @Published var isEditMode: Bool = false
+    @Published var isManualFocus: Bool = false
+    @Published var focusedWidgetId: UUID? = nil
 
     func addWidget(urlString: String, frame: CGRect, title: String = "") {
         let w = OverlayWidgetModel(frame: frame, urlString: urlString, title: title)
@@ -61,6 +64,23 @@ final class OverlayManager: ObservableObject {
     func removeWidget(id: UUID) {
         widgets.removeAll { $0.id == id }
         saveWidgets()
+    }
+    
+    func updateWidgetFrame(id: UUID, frame: CGRect) {
+        if let index = widgets.firstIndex(where: { $0.id == id }) {
+            widgets[index].frame = frame
+            saveWidgets()
+        }
+    }
+    
+    func setManualFocus(widgetId: UUID) {
+        isManualFocus = true
+        focusedWidgetId = widgetId
+    }
+    
+    func enableAutoFocus() {
+        isManualFocus = false
+        focusedWidgetId = nil
     }
     
     // MARK: - Persistence
