@@ -164,8 +164,11 @@ final class CallViewModel: ObservableObject {
     private(set) var camera: CameraController?
     lazy var abr = ABRManager(client: client)
     
-    // Signaling
-    let signalingClient = SignalingClient()
+    // OBS WebSocket Manager
+    let obsManager = OBSWebSocketManager()
+    
+    // Signaling Client
+    private let signalingClient = SignalingClient()
     @Published var webSocketURL = UserDefaults.standard.string(forKey: "webSocketURL") ?? "ws://173.249.21.219:8080" {
         didSet {
             UserDefaults.standard.set(webSocketURL, forKey: "webSocketURL")

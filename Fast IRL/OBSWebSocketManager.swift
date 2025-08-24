@@ -71,6 +71,24 @@ struct GetInputMuteResponse: Decodable {
     let inputMuted: Bool
 }
 
+struct GetStreamingStatusResponse: Decodable {
+    let outputActive: Bool
+    let outputTimecode: String?
+    let outputDuration: Int?
+    let outputBytes: Int?
+    let outputSkippedFrames: Int?
+    let outputTotalFrames: Int?
+}
+
+struct GetRecordingStatusResponse: Decodable {
+    let outputActive: Bool
+    let outputTimecode: String?
+    let outputDuration: Int?
+    let outputBytes: Int?
+    let outputSkippedFrames: Int?
+    let outputTotalFrames: Int?
+}
+
 struct GetSceneItemListResponse: Decodable {
     let sceneItems: [GetSceneItemListResponseItem]
 }
@@ -98,6 +116,7 @@ class OBSWebSocketManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var nextRequestId: Int = 0
     private var pendingRequests: [String: (Data?) -> Void] = [:]
+    private var streamingStatusTimer: Timer?
     
     // OBS Bağlantı Durumu
     @Published var isConnected = false
@@ -114,6 +133,8 @@ class OBSWebSocketManager: ObservableObject {
     @Published var isRecording = false
     @Published var streamTime = ""
     @Published var recordTime = ""
+    @Published var streamDuration: String = "00:00:00"
+    @Published var streamBytes: Int = 0
     
     // OBS Ayarları
     var obsWebSocketURL: String = "ws://localhost:4455"
@@ -445,22 +466,82 @@ class OBSWebSocketManager: ObservableObject {
         }
     }
     
-    func getInputMute(inputName: String, onResponse: @escaping (Bool) -> Void) {
-        let requestData = ["inputName": inputName]
-        sendRequest(type: "GetInputMute", requestData: requestData) { data in
-            guard let data = data else {
-                onResponse(false)
-                return
-            }
-            
-            do {
-                let response = try JSONDecoder().decode(GetInputMuteResponse.self, from: data)
-                onResponse(response.inputMuted)
-            } catch {
-                print("❌ GetInputMute parse hatası: \(error)")
-                onResponse(false)
+    func getInputMute(inputName: String, completion: @escaping (Bool?) -> Void) {
+        sendRequest(type: "GetInputMute", requestData: ["inputName": inputName]) { data in
+            if let data = data,
+               let response = try? JSONDecoder().decode(GetInputMuteResponse.self, from: data) {
+                completion(response.inputMuted)
+            } else {
+                completion(nil)
             }
         }
+    }
+    
+    func getStreamingStatus(completion: @escaping (GetStreamingStatusResponse?) -> Void) {
+        sendRequest(type: "GetStreamingStatus") { data in
+            if let data = data,
+               let response = try? JSONDecoder().decode(GetStreamingStatusResponse.self, from: data) {
+                completion(response)
+            } else {
+                completion(nil)
+            }
+        }
+    }
+    
+    func getRecordingStatus(completion: @escaping (GetRecordingStatusResponse?) -> Void) {
+        sendRequest(type: "GetRecordingStatus") { data in
+            if let data = data,
+               let response = try? JSONDecoder().decode(GetRecordingStatusResponse.self, from: data) {
+                completion(response)
+            } else {
+                completion(nil)
+            }
+        }
+    }
+    
+    func updateStreamingStatus() {
+        getStreamingStatus { [weak self] response in
+            DispatchQueue.main.async {
+                if let response = response {
+                    self?.isStreaming = response.outputActive
+                    if response.outputActive {
+                        self?.streamDuration = self?.formatDuration(response.outputDuration ?? 0) ?? "00:00:00"
+                        self?.streamBytes = response.outputBytes ?? 0
+                    } else {
+                        self?.streamDuration = "00:00:00"
+                        self?.streamBytes = 0
+                    }
+                }
+            }
+        }
+        
+        getRecordingStatus { [weak self] response in
+            DispatchQueue.main.async {
+                if let response = response {
+                    self?.isRecording = response.outputActive
+                }
+            }
+        }
+    }
+    
+    private func formatDuration(_ milliseconds: Int) -> String {
+        let totalSeconds = milliseconds / 1000
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+    
+    private func startStreamingStatusTimer() {
+        streamingStatusTimer?.invalidate()
+        streamingStatusTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.updateStreamingStatus()
+        }
+    }
+    
+    private func stopStreamingStatusTimer() {
+        streamingStatusTimer?.invalidate()
+        streamingStatusTimer = nil
     }
     
     func setInputMute(inputName: String, muted: Bool, onResponse: @escaping (Bool) -> Void) {
@@ -676,7 +757,17 @@ extension OBSWebSocketManager: WebSocketDelegate {
             self.onConnectionSuccess()
         }
         
-        getInitialData()
+        // Sahne listesini al
+        getSceneList()
+        
+        // Audio input listesini al
+        getAudioSources()
+        
+        // Streaming durumunu kontrol et
+        updateStreamingStatus()
+        
+        // Periyodik olarak streaming durumunu güncelle
+        startStreamingStatusTimer()
     }
     
     private func handleRequestResponse(data: Data) throws {
@@ -831,3 +922,5 @@ struct GetSourceScreenshot: Codable {
 struct GetSourceScreenshotResponse: Codable {
     let imageData: String
 }
+
+

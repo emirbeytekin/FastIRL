@@ -639,7 +639,6 @@ struct CameraControlsView: View {
                 
                 LensSelectionButton(vm: vm)
                 
-                
             }
             
             // Lens seçimi
