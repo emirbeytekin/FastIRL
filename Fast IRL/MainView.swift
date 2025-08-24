@@ -423,12 +423,30 @@ struct MainView: View {
             VStack(spacing: 0) {
                 HStack {
                     Button(action: { vm.sidePanelCollapsed.toggle() }) {
-                        Image(systemName: vm.sidePanelCollapsed ? "sidebar.right" : "sidebar.leading")
-                            .foregroundColor(.white)
+                        HStack(spacing: 8) {
+                            Image(systemName: vm.sidePanelCollapsed ? "sidebar.right" : "sidebar.leading")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                            Text(vm.sidePanelCollapsed ? "Menüyü Aç" : "Menüyü Kapat")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.blue.opacity(0.8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.blue.opacity(0.6), lineWidth: 1)
+                                )
+                        )
                     }
+                    .buttonStyle(PlainButtonStyle())
                     Spacer()
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
                 if !vm.sidePanelCollapsed {
                     ScrollView { controls }
                 }

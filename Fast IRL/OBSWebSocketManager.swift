@@ -846,7 +846,7 @@ extension OBSWebSocketManager: WebSocketDelegate {
                 
             case "MediaInputPlaybackStarted":
                 if let inputName = data["inputName"] as? String {
-                    print("🎬 Media input playback başladı: \(inputName)")
+//                    print("🎬 Media input playback başladı: \(inputName)")
                 }
                 break
                 
