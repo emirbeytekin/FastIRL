@@ -314,6 +314,11 @@ class OBSWebSocketManager: ObservableObject {
                     self.scenes = response.scenes.map { $0.sceneName }
                     self.currentScene = response.currentProgramSceneName
                     print("📋 Scene list alındı: \(self.scenes.count) sahne")
+                    
+                    // Mevcut sahne için ses input'larını al
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.getAudioSourcesForScene(sceneName: self.currentScene)
+                    }
                 }
             } catch {
                 print("❌ Scene list parse hatası: \(error)")
@@ -760,8 +765,7 @@ extension OBSWebSocketManager: WebSocketDelegate {
         // Sahne listesini al
         getSceneList()
         
-        // Audio input listesini al
-        getAudioSources()
+        // Audio input listesi getSceneList() içinde alınacak
         
         // Streaming durumunu kontrol et
         updateStreamingStatus()
@@ -828,6 +832,12 @@ extension OBSWebSocketManager: WebSocketDelegate {
             case "CurrentProgramSceneChanged":
                 if let sceneName = data["sceneName"] as? String {
                     self.currentScene = sceneName
+                    print("🎭 Sahne değişti: \(sceneName)")
+                    
+                    // Sahne değiştiğinde ses input'larını güncelle
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.getAudioSourcesForScene(sceneName: sceneName)
+                    }
                 }
                 
             case "InputMuteStateChanged":
