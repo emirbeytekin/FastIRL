@@ -282,26 +282,6 @@ struct NetworkStatsOverlay: View {
             
             // Sadece socket bağlıysa network stats göster
             if vm.isWebSocketConnected {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.caption)
-                    Text("UP: \(String(format: "%.1f", client.uploadSpeedKbps)) kbps")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.white)
-                        .shadow(color: .black, radius: 1, x: 1, y: 1)
-                }
-                
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .foregroundColor(.blue)
-                        .font(.caption)
-                    Text("DOWN: \(String(format: "%.1f", client.downloadSpeedKbps)) kbps")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.white)
-                        .shadow(color: .black, radius: 1, x: 1, y: 1)
-                }
-                
                 let qualityText = client.uploadSpeedKbps > 2000 ? "Good" : client.uploadSpeedKbps > 1000 ? "Fair" : "Poor"
                 let qualityColor: Color = client.uploadSpeedKbps > 2000 ? .green : client.uploadSpeedKbps > 1000 ? .orange : .red
                 let qualityIcon = client.uploadSpeedKbps > 2000 ? "🟢" : client.uploadSpeedKbps > 1000 ? "🟠" : "🔴"
