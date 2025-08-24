@@ -57,7 +57,7 @@ final class WebRTCClient: NSObject, ObservableObject {
         audioSession.lockForConfiguration()
         try? audioSession.setCategory(.playAndRecord,
                                       with: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers])
-        try? audioSession.setMode(.videoChat)
+        try? audioSession.setMode(.measurement)
         try? audioSession.setActive(true)
         audioSession.unlockForConfiguration()
     }
