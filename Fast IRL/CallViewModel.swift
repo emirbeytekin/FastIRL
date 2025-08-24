@@ -538,9 +538,9 @@ final class CallViewModel: ObservableObject {
         camera?.setManualFocus(at: location)
         
         // 3 saniye sonra focus indicator'ı gizle
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            self.focusIndicatorLocation = nil
-        }
+//        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+//            self.focusIndicatorLocation = nil
+//        }
     }
     
     func enableAutoFocus() {

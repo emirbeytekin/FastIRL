@@ -309,7 +309,6 @@ struct MainView: View {
     @StateObject var obsManager = OBSWebSocketManager()
     @State private var showingOBSControl = false
     @State private var scenesExpanded = false
-    @State private var pinchLastValue: CGFloat = 1.0
 
     let presets: [VideoPreset] = [
         VideoPreset(w: 1280, h: 720, fps: 60, label: "720p60"),
@@ -345,19 +344,6 @@ struct MainView: View {
                             // Dokunulan yerde manuel focus yap
                             vm.setManualFocus(at: location)
                         }
-                        // Pinch to Zoom
-                        .gesture(
-                            MagnificationGesture()
-                                .onChanged { value in
-                                    // value is a cumulative scale; convert to incremental delta
-                                    let delta = value / max(pinchLastValue, 0.0001)
-                                    pinchLastValue = value
-                                    vm.onPinch(scale: delta)
-                                }
-                                .onEnded { _ in
-                                    pinchLastValue = 1.0
-                                }
-                        )
                         .overlay(
                             // Dokunulan yeri gösteren focus indicator
                             vm.focusIndicatorLocation.map { location in
