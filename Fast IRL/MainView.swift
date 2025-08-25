@@ -309,6 +309,7 @@ struct MainView: View {
     @StateObject var obsManager = OBSWebSocketManager()
     @State private var showingOBSControl = false
     @State private var scenesExpanded = false
+    @State private var pinchLast: CGFloat = 1.0
 
     let presets: [VideoPreset] = [
         VideoPreset(w: 1280, h: 720, fps: 60, label: "720p60"),
@@ -415,6 +416,21 @@ struct MainView: View {
                 }
                 .padding(.top, 20)
                 .padding(.leading, 20)
+            }
+            .if(!vm.overlayManager.isEditMode) { view in
+                view.gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            let delta = value / pinchLast
+                            vm.onPinch(scale: delta)
+                            pinchLast = value
+                        }
+                        .onEnded { _ in
+                            pinchLast = 1.0
+                        }
+                )
+            } else: { view in
+                view
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 

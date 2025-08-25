@@ -483,7 +483,7 @@ class OBSWebSocketManager: ObservableObject {
     }
     
     func getStreamingStatus(completion: @escaping (GetStreamingStatusResponse?) -> Void) {
-        sendRequest(type: "GetStreamingStatus") { data in
+        sendRequest(type: "GetStreamStatus") { data in
             if let data = data,
                let response = try? JSONDecoder().decode(GetStreamingStatusResponse.self, from: data) {
                 completion(response)
@@ -494,7 +494,7 @@ class OBSWebSocketManager: ObservableObject {
     }
     
     func getRecordingStatus(completion: @escaping (GetRecordingStatusResponse?) -> Void) {
-        sendRequest(type: "GetRecordingStatus") { data in
+        sendRequest(type: "GetRecordStatus") { data in
             if let data = data,
                let response = try? JSONDecoder().decode(GetRecordingStatusResponse.self, from: data) {
                 completion(response)
