@@ -345,6 +345,17 @@ struct MainView: View {
                             // Dokunulan yerde manuel focus yap
                             vm.setManualFocus(at: location)
                         }
+                        .simultaneousGesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    let delta = value / pinchLast
+                                    vm.onPinch(scale: delta)
+                                    pinchLast = value
+                                }
+                                .onEnded { _ in
+                                    pinchLast = 1.0
+                                }
+                        )
                         .overlay(
                             // Dokunulan yeri gösteren focus indicator
                             vm.focusIndicatorLocation.map { location in
@@ -416,21 +427,6 @@ struct MainView: View {
                 }
                 .padding(.top, 20)
                 .padding(.leading, 20)
-            }
-            .if(!vm.overlayManager.isEditMode) { view in
-                view.gesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            let delta = value / pinchLast
-                            vm.onPinch(scale: delta)
-                            pinchLast = value
-                        }
-                        .onEnded { _ in
-                            pinchLast = 1.0
-                        }
-                )
-            } else: { view in
-                view
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
