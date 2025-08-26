@@ -74,15 +74,18 @@ struct ControlButton: View {
     let label: String
     let isSelected: Bool
     let action: () -> Void
+    var selectedColor: Color? = nil
 
-    private var buttonColor: Color {
-        if label == "Mute" {
-            return isSelected ? .red : Color(.systemGray6)  // Mute edilmişse (kapalıysa) kırmızı, açıksa gri
-        } else if label == "Flash" {
-            return isSelected ? .orange : Color(.systemGray6)  // Flash açıksa turuncu
-        } else {
-            return Color(.systemGray6)  // Diğer butonlar gri
-        }
+    private var effectiveFillColor: Color {
+        if let custom = selectedColor, isSelected { return custom }
+        if label == "Mute" { return isSelected ? .red : Color(.systemGray6) }
+        if label == "Flash" { return isSelected ? .orange : Color(.systemGray6) }
+        return Color(.systemGray6)
+    }
+
+    private var useWhiteContent: Bool {
+        if let _ = selectedColor, isSelected { return true }
+        return isSelected && (label == "Mute" || label == "Flash" || label == "HDR" || label == "Night Mode")
     }
 
     var body: some View {
@@ -90,21 +93,21 @@ struct ControlButton: View {
             VStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(.body, design: .rounded, weight: .semibold))
-                    .foregroundColor((isSelected && (label == "Mute" || label == "Flash")) ? .white : .primary)
+                    .foregroundColor(useWhiteContent ? .white : .primary)
 
                 Text(label)
                     .font(.system(.caption2, design: .rounded, weight: .medium))
-                    .foregroundColor((isSelected && (label == "Mute" || label == "Flash" || label == "HDR" || label == "Night Mode")) ? .white : .secondary)
+                    .foregroundColor(useWhiteContent ? .white : .secondary)
             }
             .padding(.vertical, 10)
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(buttonColor)
+                    .fill(effectiveFillColor)
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(buttonColor.opacity(0.8), lineWidth: isSelected ? 2 : 1)
+                            .stroke(effectiveFillColor.opacity(0.8), lineWidth: isSelected ? 2 : 1)
                     )
             )
         }
@@ -493,7 +496,8 @@ struct MainView: View {
             
             WebSocketConnectionView(vm: vm)
             
-            VideoQualityView(vm: vm, presets: presets)
+            ResolutionSelectorView(vm: vm)
+            FPSSelectorView(vm: vm)
             
             BitratePresetsView(vm: vm, bitratePresets: bitratePresets)
             
@@ -592,29 +596,70 @@ struct WebSocketConnectionView: View {
     }
 }
 
-struct VideoQualityView: View {
+struct ResolutionSelectorView: View {
     @ObservedObject var vm: CallViewModel
-    let presets: [VideoPreset]
+    
+    private var currentResKey: String { "\(vm.selectedPreset.w)x\(vm.selectedPreset.h)" }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Video Quality")
+            Text("Resolution")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-            
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 8) {
-                ForEach(presets) { preset in
-                    PresetButton(
-                        preset: preset,
-                        isSelected: vm.selectedPreset.label == preset.label,
-                        action: { vm.selectedPreset = preset }
-                    )
-                }
+            HStack(spacing: 8) {
+                resolutionButton(label: "720p", w: 1280, h: 720)
+                resolutionButton(label: "1080p", w: 1920, h: 1080)
+                resolutionButton(label: "4K", w: 3840, h: 2160)
             }
         }
+    }
+    
+    private func resolutionButton(label: String, w: Int32, h: Int32) -> some View {
+        let isSel = (vm.selectedPreset.w == w && vm.selectedPreset.h == h)
+        return ControlButton(
+            icon: "rectangle.inset.filled",
+            label: label,
+            isSelected: isSel,
+            action: {
+                let fps = vm.currentFps
+                let preset = VideoPreset(w: w, h: h, fps: fps, label: "\(w)x\(h)@\(fps)")
+                vm.restartForPreset(preset)
+            },
+            selectedColor: .blue
+        )
+    }
+}
+
+struct FPSSelectorView: View {
+    @ObservedObject var vm: CallViewModel
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("FPS")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                fpsButton(24)
+                fpsButton(30)
+                fpsButton(60)
+            }
+        }
+    }
+    
+    private func fpsButton(_ fps: Int) -> some View {
+        let isSel = (vm.currentFps == fps)
+        return ControlButton(
+            icon: "speedometer", 
+            label: "\(fps) FPS",
+            isSelected: isSel,
+            action: {
+                let w = vm.selectedPreset.w
+                let h = vm.selectedPreset.h
+                let preset = VideoPreset(w: w, h: h, fps: fps, label: "\(w)x\(h)@\(fps)")
+                vm.restartForPreset(preset)
+            },
+            selectedColor: .orange
+        )
     }
 }
 
@@ -706,7 +751,7 @@ struct BitratePresetsView: View {
                 ForEach(bitratePresets) { preset in
                     BitratePresetButton(
                         preset: preset,
-                        isSelected: abs(vm.maxBitrateKbps - preset.value) < 1,
+                        isSelected: abs(vm.maxBitrateKbps - preset.value) <= 100,
                         action: { vm.setMaxBitrate(preset.value) }
                     )
                 }

@@ -92,6 +92,12 @@
           <div class="icon">📺</div>
           <div>Yayın bekleniyor...</div>
         </div>
+        <!-- Live stats overlay (çözünürlük / fps / bitrate) -->
+      <div id="statsOverlay" style="position:absolute;left:12px;bottom:170px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:8px 10px;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:12px;line-height:1.4;z-index:3;">
+        <div id="dim">-</div>
+        <div id="fps">-</div>
+        <div id="rtp">-</div>
+      </div>
   
         <!-- Tam ekran düğmesi -->
         <!-- <button id="fullscreenBtn"
@@ -106,11 +112,15 @@
                 style="position:absolute;top:20px;right:140px;background:rgba(255,193,7,0.9);color:#000;border:none;padding:12px 16px;border-radius:10px;cursor:pointer;z-index:3;font-size:14px;font-weight:bold;box-shadow:0 2px 10px rgba(0,0,0,.3);">
           🔇 Ses Kapalı
         </button> -->
+
+       
       </div>
 
       
   <div class="container">
     <div class="logo">Fast IRL</div>
+
+     
 
     <div class="room-id">
       <div class="room-id-label">Oda ID:</div>
@@ -401,7 +411,26 @@
         
         // Ses kontrolünü güncelle
         this.updateAudioButton();
+
+        // Live stats başlat
+        this.startVideoObservers();
+        this.startStatsPolling();
       }
+
+      updateAudioButton(){
+        const video = this.remoteVideo;
+        const btn = document.getElementById('audioBtn');
+        if(!btn || !video) return;
+        if(video.muted){
+          btn.textContent = '🔊 Ses Açık';
+          btn.style.background = 'rgba(255,255,255,0.9)';
+        } else {
+          btn.textContent = '🔇 Ses Kapalı';
+          btn.style.background = 'rgba(255,193,7,0.9)';
+        }
+      }
+
+      
 
       // ---- UI Modları
       startStreamingUI(){
@@ -410,6 +439,72 @@
 
         // Yayın başladığında otomatik tam ekran istiyorsan:
         setTimeout(()=>{ if(!this.videoContainer.classList.contains('fullscreen')) toggleFullscreen(); }, 800);
+      }
+
+      // --- Görüntü çözünürlüğü ve FPS ölçümü (video elementinden)
+      startVideoObservers(){
+        const dimEl = document.getElementById('dim');
+        const fpsEl = document.getElementById('fps');
+
+        const updateDims = () => {
+          const w = this.remoteVideo?.videoWidth || 0;
+          const h = this.remoteVideo?.videoHeight || 0;
+          dimEl.textContent = `video element: ${w}x${h}`;
+        };
+        this.remoteVideo?.addEventListener('loadedmetadata', updateDims);
+        this.remoteVideo?.addEventListener('resize', updateDims);
+        updateDims();
+
+        const onFrame = (now) => {
+          if(this._lastFrameTs !== undefined){
+            const dt = (now - this._lastFrameTs) / 1000.0;
+            const inst = dt > 0 ? 1 / dt : 0;
+            this._fpsEMA = this._fpsEMA === undefined ? inst : (0.8 * this._fpsEMA + 0.2 * inst);
+            fpsEl.textContent = `estimated FPS: ${this._fpsEMA.toFixed(1)}`;
+          }
+          this._lastFrameTs = now;
+          this.remoteVideo?.requestVideoFrameCallback(onFrame);
+        };
+        if (this.remoteVideo && 'requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+          this.remoteVideo.requestVideoFrameCallback(onFrame);
+        }
+      }
+
+      // --- WebRTC istatistiklerinden çözünürlük / FPS / bitrate
+      startStatsPolling(){
+        const rtpEl = document.getElementById('rtp');
+        const pc = this.peerConnection;
+        if(!pc) return;
+        const poll = async () => {
+          try{
+            const report = await pc.getStats();
+            let width, height, fps, bitrateKbps;
+            let bytesPrev = this._bytesPrev || 0;
+            let tsPrev = this._tsPrev || 0;
+
+            report.forEach(stat => {
+              if (stat.type === 'inbound-rtp' && (stat.kind === 'video' || stat.mediaType === 'video')) {
+                width = stat.frameWidth ?? width;
+                height = stat.frameHeight ?? height;
+                fps = stat.framesPerSecond ?? fps;
+                const bytes = stat.bytesReceived || 0;
+                const ts = stat.timestamp || performance.now();
+                if (tsPrev && bytesPrev && ts > tsPrev) {
+                  const kbps = (8 * (bytes - bytesPrev)) / ((ts - tsPrev) / 1000) / 1000;
+                  bitrateKbps = Math.max(0, kbps);
+                }
+                this._bytesPrev = bytes;
+                this._tsPrev = ts;
+              }
+            });
+
+            const dimTxt = (width && height) ? `${width}x${height}` : '-';
+            const fpsTxt = (typeof fps === 'number') ? `${fps.toFixed(1)} fps` : '-';
+            const brTxt = (typeof bitrateKbps === 'number') ? `${bitrateKbps.toFixed(0)} kbps` : '-';
+            rtpEl.textContent = `getStats: ${dimTxt}, ${fpsTxt}, ${brTxt}`;
+          } catch(e) {}
+        };
+        this._statsTimer = setInterval(poll, 1000);
       }
 
       stopStreamingUI(){
@@ -475,9 +570,9 @@
       const vc=document.getElementById('videoContainer');
       const btn=document.getElementById('fullscreenBtn');
       if(vc.classList.contains('fullscreen')){
-        vc.classList.remove('fullscreen'); btn.textContent='⛶ Tam Ekran';
+        vc.classList.remove('fullscreen'); if(btn){ btn.textContent='⛶ Tam Ekran'; }
       }else{
-        vc.classList.add('fullscreen'); btn.textContent='⛶ Küçült';
+        vc.classList.add('fullscreen'); if(btn){ btn.textContent='⛶ Küçült'; }
       }
     }
     document.addEventListener('keydown',(e)=>{ if(e.key==='Escape'){ const vc=document.getElementById('videoContainer'); if(vc.classList.contains('fullscreen')) toggleFullscreen(); } });

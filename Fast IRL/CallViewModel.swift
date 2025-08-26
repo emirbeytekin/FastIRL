@@ -202,6 +202,8 @@ final class CallViewModel: ObservableObject {
                 
                 // Yayını durdur
                 isPublishing = false
+                // ABR'yi devre dışı bırak
+                abr.enabled = false
                 
                 print("✋ Otomatik reconnect devre dışı - manuel bağlantı gerekli")
                 // Otomatik reconnect sistemi tamamen kaldırıldı
@@ -209,6 +211,8 @@ final class CallViewModel: ObservableObject {
             }
         }
     }
+
+    
     @Published var hasAttemptedConnection = false
     @Published var showWebRTCAlert = false
     @Published var showOBSStartStreamAlert = false
@@ -285,6 +289,18 @@ final class CallViewModel: ObservableObject {
         // Update currentFps to match selectedPreset
         self.currentFps = self.selectedPreset.fps
         abr.targetMaxKbps = Int(maxBitrateKbps)
+        // ABR geri beslemeleri ile UI senkronu
+        abr.onAdaptQuality = { [weak self] w, h, fps in
+            DispatchQueue.main.async {
+                self?.selectedPreset = VideoPreset(w: w, h: h, fps: fps, label: "\(w)x\(h)@\(fps)")
+                self?.currentFps = fps
+            }
+        }
+        abr.onBitrateChanged = { [weak self] kbps in
+            DispatchQueue.main.async {
+                self?.maxBitrateKbps = Double(kbps)
+            }
+        }
         
         print("ℹ️ Sadece web widget'ları destekleniyor (OVERLAY'LER SADECE LOCAL'DE!)")
         print("📱 Loaded settings: \(selectedPreset.label), \(maxBitrateKbps) kbps")
@@ -326,9 +342,9 @@ final class CallViewModel: ObservableObject {
         client.setVideoMaxBitrate(kbps: Int(maxBitrateKbps))
         client.adaptOutputFormat(width: selectedPreset.w, height: selectedPreset.h, fps: selectedPreset.fps)
         client.setMicEnabled(micOn)
-        // ABR temporarily disabled for better quality
-        // abr.enabled = true
-        // abr.start()
+        // ABR sadece WebRTC bağlıyken etkili olsun
+        abr.enabled = isWebRTCConnected
+        abr.start()
         // Stats monitoring will start when WebRTC connection is established
         isSetupInProgress = false
         objectWillChange.send()

@@ -15,6 +15,10 @@ final class ABRManager {
     var stepDownFactor: Double = 0.8
     var stepUpFactor: Double = 1.15
 
+    // UI senkronizasyonu için geri bildirimler
+    var onAdaptQuality: ((Int32, Int32, Int) -> Void)?
+    var onBitrateChanged: ((Int) -> Void)?
+
     private var consecutiveBad = 0
     private var consecutiveGood = 0
 
@@ -39,11 +43,16 @@ final class ABRManager {
         case .nominal, .fair:
             break
         case .serious:
-            client.setVideoMaxBitrate(kbps: max(minKbps, Int(Double(targetMaxKbps) * 0.5)))
+            let kbps = max(minKbps, Int(Double(targetMaxKbps) * 0.5))
+            client.setVideoMaxBitrate(kbps: kbps)
+            onBitrateChanged?(kbps)
             client.adaptOutputFormat(width: 1280, height: 720, fps: 30)
+            onAdaptQuality?(1280, 720, 30)
         case .critical:
             client.setVideoMaxBitrate(kbps: minKbps)
+            onBitrateChanged?(minKbps)
             client.adaptOutputFormat(width: 960, height: 540, fps: 24)
+            onAdaptQuality?(960, 540, 24)
         @unknown default:
             break
         }
@@ -56,11 +65,13 @@ final class ABRManager {
             var bytesSent: UInt64 = 0
             var fractionLost: Double = 0
             var rttMs: Double = 0
+            var foundVideoOutbound = false
 
             for (_, stat) in report.statistics {
                 if stat.type == "outbound-rtp" {
                     let mediaTypeStr: String? = (stat.values["mediaType"] as? String) ?? (stat.values["mediaType"] as? NSNumber)?.stringValue
                     if mediaTypeStr == "video" {
+                        foundVideoOutbound = true
                         if let bStr = stat.values["bytesSent"] as? String, let u = UInt64(bStr) {
                             bytesSent = u
                         } else if let bNum = stat.values["bytesSent"] as? NSNumber {
@@ -82,6 +93,9 @@ final class ABRManager {
                 }
             }
 
+            // WebRTC outbound video akışı yoksa (bağlı değil ya da henüz track eklenmemiş), uyarlamayı atla
+            if !foundVideoOutbound { return }
+
             let now = CACurrentMediaTime()
             let dt = now - self.lastTs
             self.lastTs = now
@@ -96,12 +110,15 @@ final class ABRManager {
                 let newMax = max(self.minKbps, Int(Double(self.targetMaxKbps) * self.stepDownFactor))
                 self.targetMaxKbps = newMax
                 client.setVideoMaxBitrate(kbps: newMax)
+                self.onBitrateChanged?(newMax)
                 client.adaptOutputFormat(width: 1280, height: 720, fps: 30)
+                self.onAdaptQuality?(1280, 720, 30)
                 self.consecutiveBad = 0
             } else if self.consecutiveGood >= 4 {
                 let newMax = min(8_000, Int(Double(self.targetMaxKbps) * self.stepUpFactor))
                 self.targetMaxKbps = newMax
                 client.setVideoMaxBitrate(kbps: newMax)
+                self.onBitrateChanged?(newMax)
                 self.consecutiveGood = 0
             }
         }

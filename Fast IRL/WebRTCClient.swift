@@ -143,16 +143,16 @@ final class WebRTCClient: NSObject, ObservableObject {
             for (id, stat) in report.statistics {
                 if stat.type == "outbound-rtp" {
                     foundOutbound = true
-                    print("📊 Outbound RTP stat found - ID: \(id)")
-                    print("📊   Values: \(stat.values)")
+//                    print("📊 Outbound RTP stat found - ID: \(id)")
+//                    print("📊   Values: \(stat.values)")
                     
                     // Video kontrolünü "kind" ile yapalım (MediaType yerine)
                     if let kind = stat.values["kind"] as? String {
-                        print("📊   Kind: \(kind)")
+//                        print("📊   Kind: \(kind)")
                         if kind == "video",
                            let bytes = stat.values["bytesSent"] as? NSNumber {
                             bytesSent += bytes.uint64Value
-                            print("📊 ✅ Video bytes sent: \(bytes.uint64Value)")
+                            // print("📊 ✅ Video bytes sent: \(bytes.uint64Value)")
                         } else if kind == "audio" {
                             print("📊 ⚠️ Audio stat ignored")
                         }
@@ -162,16 +162,16 @@ final class WebRTCClient: NSObject, ObservableObject {
                 }
                 if stat.type == "inbound-rtp" {
                     foundInbound = true
-                    print("📊 Inbound RTP stat found - ID: \(id)")
-                    print("📊   Values: \(stat.values)")
+//                    print("📊 Inbound RTP stat found - ID: \(id)")
+//                    print("📊   Values: \(stat.values)")
                     
                     // Video kontrolünü "kind" ile yapalım (MediaType yerine)
                     if let kind = stat.values["kind"] as? String {
-                        print("📊   Kind: \(kind)")
+//                        print("📊   Kind: \(kind)")
                         if kind == "video",
                            let bytes = stat.values["bytesReceived"] as? NSNumber {
                             bytesReceived += bytes.uint64Value
-                            print("📊 ✅ Video bytes received: \(bytes.uint64Value)")
+                            // print("📊 ✅ Video bytes received: \(bytes.uint64Value)")
                         } else if kind == "audio" {
                             print("📊 ⚠️ Audio stat ignored")
                         }
@@ -182,16 +182,16 @@ final class WebRTCClient: NSObject, ObservableObject {
                 
                 // List all stat types to see what we have
                 if !["outbound-rtp", "inbound-rtp"].contains(stat.type) {
-                    print("📊 Other stat: \(stat.type)")
+                    // print("📊 Other stat: \(stat.type)")
                 }
             }
             
-            print("📊 Found - Outbound: \(foundOutbound), Inbound: \(foundInbound)")
+           //  print("📊 Found - Outbound: \(foundOutbound), Inbound: \(foundInbound)")
             
             let currentTime = CACurrentMediaTime()
             let timeDiff = currentTime - self.lastStatsTime
             
-            print("📊 Final - Bytes sent: \(bytesSent), received: \(bytesReceived), timeDiff: \(timeDiff)")
+            // print("📊 Final - Bytes sent: \(bytesSent), received: \(bytesReceived), timeDiff: \(timeDiff)")
             
             if timeDiff > 0 && self.lastStatsTime > 0 {
                 let uploadDiff = bytesSent - self.lastBytesSent
@@ -200,12 +200,12 @@ final class WebRTCClient: NSObject, ObservableObject {
                 let uploadSpeedCalculated = Double(uploadDiff * 8) / (timeDiff * 1000)
                 let downloadSpeedCalculated = Double(downloadDiff * 8) / (timeDiff * 1000)
                 
-                print("📊 Speed calculation - Upload: \(uploadSpeedCalculated) kbps, Download: \(downloadSpeedCalculated) kbps")
+                // print("📊 Speed calculation - Upload: \(uploadSpeedCalculated) kbps, Download: \(downloadSpeedCalculated) kbps")
                 
                 DispatchQueue.main.async {
                     self.uploadSpeedKbps = uploadSpeedCalculated
                     self.downloadSpeedKbps = downloadSpeedCalculated
-                    print("📊 UI updated - Upload: \(self.uploadSpeedKbps), Download: \(self.downloadSpeedKbps)")
+                    // print("📊 UI updated - Upload: \(self.uploadSpeedKbps), Download: \(self.downloadSpeedKbps)")
                     
                     // Bitrate'i delegate'e gönder
                     self.delegate?.webRTCClient(self, didUpdateBitrate: uploadSpeedCalculated)
