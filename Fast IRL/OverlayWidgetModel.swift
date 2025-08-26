@@ -37,6 +37,13 @@ final class OverlayWidgetModel: ObservableObject, Identifiable {
         webView.scrollView.showsHorizontalScrollIndicator = false
     }
     
+    deinit {
+        // WebView bellek temizliği
+        webView.stopLoading()
+        webView.loadHTMLString("", baseURL: nil)
+        webView.evaluateJavaScript("document.body.innerHTML = '';") { _, _ in }
+    }
+    
     private static func extractTitleFromURL(_ urlString: String) -> String {
         guard let url = URL(string: urlString) else { return "Widget" }
         
@@ -62,8 +69,14 @@ final class OverlayManager: ObservableObject {
     }
 
     func removeWidget(id: UUID) {
-        widgets.removeAll { $0.id == id }
-        saveWidgets()
+        if let index = widgets.firstIndex(where: { $0.id == id }) {
+            let widget = widgets[index]
+            // Widget'ı durdur ve belleği temizle
+            widget.webView.stopLoading()
+            widget.webView.loadHTMLString("", baseURL: nil)
+            widgets.remove(at: index)
+            saveWidgets()
+        }
     }
     
     func updateWidgetFrame(id: UUID, frame: CGRect) {
@@ -89,6 +102,15 @@ final class OverlayManager: ObservableObject {
     
     init() {
         loadWidgets()
+    }
+    
+    deinit {
+        // Tüm widget'ları temizle
+        for widget in widgets {
+            widget.webView.stopLoading()
+            widget.webView.loadHTMLString("", baseURL: nil)
+        }
+        widgets.removeAll()
     }
     
     private func saveWidgets() {
