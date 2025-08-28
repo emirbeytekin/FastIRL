@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Fast IRL - Live Stats</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#000;min-height:100vh;display:flex;align-items:center;justify-content:center;color:#fff}
+    .video-container{background:#000;border-radius:12px;height:90vh;width:90vw;display:flex;align-items:center;justify-content:center;position:relative;border:2px solid #4ecdc4}
+    video{width:100%;height:100%;object-fit:fill;background:#000;border-radius:12px}
+    .overlay{position:absolute;left:12px;bottom:12px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:8px 10px;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:12px;line-height:1.4}
+    .hidden{display:none}
+  </style>
+  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+</head>
+<body>
+  <div class="video-container" id="videoContainer">
+    <video id="remoteVideo" autoplay playsinline></video>
+    <div class="overlay" id="statsOverlay">
+      <div id="dim">-</div>
+      <div id="fps">-</div>
+      <div id="rtp">-</div>
+    </div>
+  </div>
+
+  <script>
+    class LiveStatsPage {
+      constructor(){
+        this.roomId = this.getRoomIdFromQuery() || this.generateRoomId();
+        this.websocket = null;
+        this.peerConnection = null;
+        this.video = document.getElementById('remoteVideo');
+        this.statsOverlay = document.getElementById('statsOverlay');
+        this._lastFrameTs = undefined;
+        this._fpsEMA = undefined; // exponential moving average
+        this._statsTimer = null;
+        this.connectWebSocket();
+      }
+
+      getRoomIdFromQuery(){
+        const u = new URL(window.location.href);
+        return u.searchParams.get('room');
+      }
+
+      generateRoomId(){
+        const chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let r=''; for(let i=0;i<6;i++){ r+=chars.charAt(Math.floor(Math.random()*chars.length)); }
+        return r;
+      }
+
+      connectWebSocket(){
+        const host = window.location.hostname;
+        const port = window.location.port || '8080';
+        const wsUrl = `ws://${host}:${port}/${this.roomId}`;
+        this.websocket = new WebSocket(wsUrl);
+
+        this.websocket.onopen = () => {};
+
+        this.websocket.onmessage = (ev) => {
+          let data; try { data = JSON.parse(ev.data); } catch { return; }
+          this.handleMessage(data);
+        };
+
+        this.websocket.onclose = () => {};
+        this.websocket.onerror = () => {};
+      }
+
+      async handleMessage(data){
+        switch(data.type){
+          case 'offer':
+            await this.handleOffer(data);
+            break;
+          case 'answer':
+            await this.handleAnswer(data);
+            break;
+          case 'ice-candidate':
+            await this.handleIce(data);
+            break;
+          case 'stream_started':
+            break;
+        }
+      }
+
+      async handleOffer(data){
+        try{
+          this.peerConnection = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
+          this.peerConnection.ontrack = (ev)=>{ this.attachStream(ev.streams[0]); };
+          this.peerConnection.onicecandidate = (ev)=>{ if(ev.candidate){ this.websocket?.send(JSON.stringify({type:'ice-candidate',candidate:ev.candidate,roomId:this.roomId})); } };
+          await this.peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await this.peerConnection.createAnswer();
+          await this.peerConnection.setLocalDescription(answer);
+          this.websocket?.send(JSON.stringify({type:'answer',answer,roomId:this.roomId}));
+        }catch(e){}
+      }
+
+      async handleAnswer(data){
+        try{ await this.peerConnection?.setRemoteDescription(new RTCSessionDescription(data.answer)); }catch(e){}
+      }
+
+      async handleIce(data){
+        try{ await this.peerConnection?.addIceCandidate(new RTCIceCandidate(data.candidate)); }catch(e){}
+      }
+
+      attachStream(stream){
+        this.video.srcObject = stream;
+        const tryPlay = () => this.video.play().catch(()=>setTimeout(tryPlay, 300));
+        tryPlay();
+        this.startVideoObservers();
+        this.startStatsPolling();
+      }
+
+      // --- Görüntü çözünürlüğü ve FPS ölçümü (video elementinden)
+      startVideoObservers(){
+        const dimEl = document.getElementById('dim');
+        const fpsEl = document.getElementById('fps');
+
+        const updateDims = () => {
+          const w = this.video.videoWidth || 0;
+          const h = this.video.videoHeight || 0;
+          dimEl.textContent = `video element: ${w}x${h}`;
+        };
+        this.video.addEventListener('loadedmetadata', updateDims);
+        this.video.addEventListener('resize', updateDims);
+        updateDims();
+
+        const onFrame = (now, metadata) => {
+          if(this._lastFrameTs !== undefined){
+            const dt = (now - this._lastFrameTs) / 1000.0;
+            const inst = dt > 0 ? 1 / dt : 0;
+            this._fpsEMA = this._fpsEMA === undefined ? inst : (0.8 * this._fpsEMA + 0.2 * inst);
+            fpsEl.textContent = `estimated FPS: ${this._fpsEMA.toFixed(1)}`;
+          }
+          this._lastFrameTs = now;
+          this.video.requestVideoFrameCallback(onFrame);
+        };
+        if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+          this.video.requestVideoFrameCallback(onFrame);
+        } else {
+          
+        }
+      }
+
+      // --- WebRTC istatistiklerinden çözünürlük / FPS / bitrate
+      startStatsPolling(){
+        const rtpEl = document.getElementById('rtp');
+        const pc = this.peerConnection;
+        if(!pc) return;
+        const poll = async () => {
+          try{
+            const report = await pc.getStats();
+            let width, height, fps, bitrateKbps;
+            let bytesPrev = this._bytesPrev || 0;
+            let tsPrev = this._tsPrev || 0;
+
+            report.forEach(stat => {
+              if (stat.type === 'inbound-rtp' && (stat.kind === 'video' || stat.mediaType === 'video')) {
+                width = stat.frameWidth ?? width;
+                height = stat.frameHeight ?? height;
+                fps = stat.framesPerSecond ?? fps;
+                const bytes = stat.bytesReceived || 0;
+                const ts = stat.timestamp || performance.now();
+                if (tsPrev && bytesPrev && ts > tsPrev) {
+                  const kbps = (8 * (bytes - bytesPrev)) / ((ts - tsPrev) / 1000) / 1000;
+                  bitrateKbps = Math.max(0, kbps);
+                }
+                this._bytesPrev = bytes;
+                this._tsPrev = ts;
+              }
+            });
+
+            const dimTxt = (width && height) ? `${width}x${height}` : '-';
+            const fpsTxt = (typeof fps === 'number') ? `${fps.toFixed(1)} fps` : '-';
+            const brTxt = (typeof bitrateKbps === 'number') ? `${bitrateKbps.toFixed(0)} kbps` : '-';
+            rtpEl.textContent = `getStats: ${dimTxt}, ${fpsTxt}, ${brTxt}`;
+            if (width && height) console.log(`📊 getStats video: ${width}x${height}, ${fpsTxt}, ${brTxt}`);
+          } catch(e) {}
+        };
+        this._statsTimer = setInterval(poll, 1000);
+      }
+    }
+
+    // Başlat
+    const page = new LiveStatsPage();
+    
+  </script>
+</body>
+</html>
+
+

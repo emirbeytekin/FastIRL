@@ -3,6 +3,7 @@ import SwiftUI
 import AVFoundation
 import WebRTC
 import Combine
+import HaishinKit
 
 struct VideoPreset: Identifiable, Hashable {
     let id = UUID()
@@ -18,7 +19,13 @@ struct BitratePreset: Identifiable, Hashable {
     let label: String
 }
 
-
+enum StreamingMode: String, CaseIterable, Identifiable {
+    case webRTC = "WebRTC"
+    case srt = "SRT"
+    case dual = "Dual Mode"
+    
+    var id: String { rawValue }
+}
 
 @MainActor
 final class CallViewModel: ObservableObject {
@@ -30,6 +37,13 @@ final class CallViewModel: ObservableObject {
     @Published var micOn = true
     @Published var torchOn = false
     @Published var position: AVCaptureDevice.Position = .back
+    
+    // Dual Streaming Support
+    @Published var selectedStreamingMode: StreamingMode = .webRTC
+    @Published var srtServerURL = "srt://localhost:9001"
+    @Published var srtLatency = 120 // milliseconds
+    @Published var srtBufferSizeMB = 1 // MB
+    
     // Her kamera pozisyonu için ayrı lens ayarları
     @Published var backCameraLens: LensKind = .wide
     @Published var frontCameraLens: LensKind = .wide
@@ -163,6 +177,9 @@ final class CallViewModel: ObservableObject {
     private(set) var cameraCapturer: RTCCameraVideoCapturer?
     private(set) var camera: CameraController?
     lazy var abr = ABRManager(client: client)
+    
+    // Dual Streaming Manager
+    lazy var dualStreamingManager = DualStreamingManager()
     
     // OBS WebSocket Manager
     let obsManager = OBSWebSocketManager()
@@ -488,13 +505,27 @@ final class CallViewModel: ObservableObject {
     }
 
     func restartForPreset(_ preset: VideoPreset) {
-        selectedPreset = preset
-        // Save to UserDefaults
-        UserDefaults.standard.set("\(preset.w)x\(preset.h)@\(preset.fps)", forKey: "selectedPreset")
+        print("🔄 Restarting for preset: \(preset.label)")
         
+        // Update dual streaming manager video settings
+        dualStreamingManager.updateVideoSettings(
+            width: Int32(preset.w),
+            height: Int32(preset.h),
+            fps: Int32(preset.fps),
+            bitrate: Int32(maxBitrateKbps)
+        )
+        
+        // Update current settings
+        selectedPreset = preset
+        currentFps = preset.fps
+        
+        // Restart camera with new settings
         camera?.start(position: position, lens: lens, width: preset.w, height: preset.h, fps: preset.fps)
-        compositor?.updateOutputSize(width: preset.w, height: preset.h)
-        applyFPS(preset.fps)
+        
+        // Update WebRTC client
+        client.setVideoMaxBitrate(kbps: Int(maxBitrateKbps))
+        
+        print("✅ Preset applied: \(preset.label)")
     }
 
     func toggleMic() { 
@@ -620,6 +651,86 @@ final class CallViewModel: ObservableObject {
         client.setVideoMaxBitrate(kbps: Int(kbps)); 
         abr.targetMaxKbps = Int(kbps)
         UserDefaults.standard.set(kbps, forKey: "maxBitrateKbps")
+    }
+    
+    // MARK: - Dual Streaming Methods
+    
+    func switchStreamingMode(_ mode: StreamingMode) {
+        // Stop current streaming if active
+        if isPublishing {
+            stop()
+        }
+        
+        selectedStreamingMode = mode
+        
+        // Update dual streaming manager
+        dualStreamingManager.selectedMode = mode
+        
+        // Update video settings for new mode
+        updateVideoSettingsForMode(mode)
+        
+        print("🔄 Streaming mode switched to: \(mode.rawValue)")
+    }
+    
+    func startSRTStream() {
+        print("🚀 Starting SRT stream to: \(srtServerURL)")
+        
+        // Sync URL with DualStreamingManager
+        dualStreamingManager.srtServerURL = srtServerURL
+        dualStreamingManager.srtLatency = srtLatency
+        dualStreamingManager.srtBufferSize = srtBufferSizeMB * 1024 * 1024
+        
+        dualStreamingManager.startStreaming()
+    }
+    
+    func stopSRTStream() {
+        print("🛑 Stopping SRT stream...")
+        dualStreamingManager.stopStreaming()
+    }
+    
+    // MARK: - Dual Mode Coordination
+    func startDualMode() {
+        print("🚀 Starting Dual Mode (WebRTC + SRT)...")
+        
+        // Start WebRTC first
+        if !isPublishing {
+            start()
+        }
+        
+        // Start SRT stream
+        startSRTStream()
+        
+        print("✅ Dual Mode started")
+    }
+    
+    func stopDualMode() {
+        print("🛑 Stopping Dual Mode...")
+        
+        // Stop SRT stream
+        stopSRTStream()
+        
+        // Stop WebRTC if it was started by dual mode
+        if isPublishing {
+            stop()
+        }
+        
+        print("✅ Dual Mode stopped")
+    }
+    
+    private func updateVideoSettingsForMode(_ mode: StreamingMode) {
+        switch mode {
+        case .webRTC:
+            // WebRTC settings remain the same
+            break
+        case .srt:
+            // SRT settings - lower bitrate for better stability
+            setMaxBitrate(5000) // 5 Mbps for SRT
+            print("📡 SRT mode: Bitrate set to 5 Mbps")
+        case .dual:
+            // Dual mode - balanced settings
+            setMaxBitrate(8000) // 8 Mbps for dual streaming
+            print("📡 Dual mode: Bitrate set to 8 Mbps")
+        }
     }
 
     // overlays

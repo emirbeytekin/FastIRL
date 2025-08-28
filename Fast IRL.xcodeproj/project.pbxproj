@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		480005F82E5728620076EBC6 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 480005F72E5728620076EBC6 /* WebRTC */; };
 		4817D55A2E5919CE00E36F32 /* Starscream in Frameworks */ = {isa = PBXBuildFile; productRef = 4817D5592E5919CE00E36F32 /* Starscream */; };
+		4879FCEF2E5D83C0007728E8 /* HaishinKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4879FCEE2E5D83C0007728E8 /* HaishinKit */; };
+		4879FCF12E5D83C0007728E8 /* SRTHaishinKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4879FCF02E5D83C0007728E8 /* SRTHaishinKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +31,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				480005F82E5728620076EBC6 /* WebRTC in Frameworks */,
+				4879FCEF2E5D83C0007728E8 /* HaishinKit in Frameworks */,
+				4879FCF12E5D83C0007728E8 /* SRTHaishinKit in Frameworks */,
 				4817D55A2E5919CE00E36F32 /* Starscream in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -74,6 +78,8 @@
 			packageProductDependencies = (
 				480005F72E5728620076EBC6 /* WebRTC */,
 				4817D5592E5919CE00E36F32 /* Starscream */,
+				4879FCEE2E5D83C0007728E8 /* HaishinKit */,
+				4879FCF02E5D83C0007728E8 /* SRTHaishinKit */,
 			);
 			productName = "Fast IRL";
 			productReference = 480005E82E5727CB0076EBC6 /* Fast IRL.app */;
@@ -106,6 +112,7 @@
 			packageReferences = (
 				480005F62E5728620076EBC6 /* XCRemoteSwiftPackageReference "WebRTC" */,
 				4817D5582E5919CE00E36F32 /* XCRemoteSwiftPackageReference "Starscream" */,
+				4879FCED2E5D83C0007728E8 /* XCRemoteSwiftPackageReference "HaishinKit.swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 480005E92E5727CB0076EBC6 /* Products */;
@@ -361,6 +368,14 @@
 				minimumVersion = 4.0.8;
 			};
 		};
+		4879FCED2E5D83C0007728E8 /* XCRemoteSwiftPackageReference "HaishinKit.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/HaishinKit/HaishinKit.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -373,6 +388,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4817D5582E5919CE00E36F32 /* XCRemoteSwiftPackageReference "Starscream" */;
 			productName = Starscream;
+		};
+		4879FCEE2E5D83C0007728E8 /* HaishinKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4879FCED2E5D83C0007728E8 /* XCRemoteSwiftPackageReference "HaishinKit.swift" */;
+			productName = HaishinKit;
+		};
+		4879FCF02E5D83C0007728E8 /* SRTHaishinKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4879FCED2E5D83C0007728E8 /* XCRemoteSwiftPackageReference "HaishinKit.swift" */;
+			productName = SRTHaishinKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

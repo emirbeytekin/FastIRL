@@ -494,6 +494,9 @@ struct MainView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Fast IRL").font(.headline)
             
+            // Streaming Mode Selector
+            StreamingModeSelectorView(vm: vm)
+            
             WebSocketConnectionView(vm: vm)
             
             ResolutionSelectorView(vm: vm)
@@ -1221,6 +1224,253 @@ struct LensSelectionButton: View {
         case .ultraWide: return "Ultra Wide"
         case .tele: return "Tele Lens"
         }
+    }
+}
+
+// MARK: - Streaming Mode Selector
+struct StreamingModeSelectorView: View {
+    @ObservedObject var vm: CallViewModel
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Streaming Mode").font(.subheadline).fontWeight(.semibold)
+            
+            HStack(spacing: 8) {
+                ForEach(StreamingMode.allCases) { mode in
+                    Button(action: {
+                        vm.switchStreamingMode(mode)
+                    }) {
+                        Text(mode.rawValue)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(vm.selectedStreamingMode == mode ? Color.blue : Color.gray.opacity(0.6))
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            
+            // Global Error Display
+            if let errorMessage = vm.dualStreamingManager.errorMessage {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                    Text(errorMessage)
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .lineLimit(3)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(4)
+            }
+            
+            // SRT Settings (when SRT or Dual mode selected)
+            if vm.selectedStreamingMode == .srt || vm.selectedStreamingMode == .dual {
+                SRTSettingsView(vm: vm)
+            }
+        }
+    }
+}
+
+// MARK: - SRT Settings View
+struct SRTSettingsView: View {
+    @ObservedObject var vm: CallViewModel
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("SRT Settings").font(.caption).fontWeight(.medium)
+                .foregroundColor(.orange)
+            
+            // Error Display
+            if let errorMessage = vm.dualStreamingManager.errorMessage {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                    Text(errorMessage)
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.red.opacity(0.1))
+                .cornerRadius(4)
+            }
+            
+            // Status Display
+            HStack {
+                Image(systemName: statusIcon)
+                    .foregroundColor(statusColor)
+                Text(statusText)
+                    .font(.caption2)
+                    .foregroundColor(statusColor)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(statusColor.opacity(0.1))
+            .cornerRadius(4)
+            
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Server:")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    TextField("srt://localhost:9001", text: $vm.srtServerURL)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .font(.caption2)
+                }
+                
+                HStack {
+                    Text("Latency:")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    TextField("120", value: $vm.srtLatency, format: .number)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .font(.caption2)
+                        .frame(width: 60)
+                    Text("ms")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                
+                HStack {
+                    Text("Buffer:")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    TextField("1", value: $vm.srtBufferSizeMB, format: .number)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .font(.caption2)
+                        .frame(width: 60)
+                    Text("MB")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                
+                // SRT Bağlan Butonu
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        if vm.dualStreamingManager.isStreaming {
+                            vm.stopSRTStream()
+                        } else {
+                            vm.startSRTStream()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: buttonIcon)
+                                .font(.caption2)
+                            Text(buttonText)
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(buttonColor)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .disabled(vm.dualStreamingManager.isStreaming)
+                }
+                
+                // Dual Mode Butonları (SRT veya Dual seçildiğinde)
+                if vm.selectedStreamingMode == .dual {
+                    HStack(spacing: 8) {
+                        Button(action: {
+                            vm.startDualMode()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "antenna.radiowaves.left.and.right")
+                                    .font(.caption2)
+                                Text("Start Dual")
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.purple)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .disabled(vm.dualStreamingManager.isStreaming)
+                        
+                        Button(action: {
+                            vm.stopDualMode()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "stop.fill")
+                                    .font(.caption2)
+                                Text("Stop Dual")
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color.red)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .disabled(!vm.dualStreamingManager.isStreaming)
+                    }
+                }
+            }
+        }
+        .padding(.leading, 8)
+    }
+    
+    // MARK: - Computed Properties
+    private var statusIcon: String {
+        switch vm.dualStreamingManager.streamingStatus {
+        case .stopped: return "circle.fill"
+        case .starting: return "clock.fill"
+        case .streaming: return "antenna.radiowaves.left.and.right"
+        case .error: return "exclamationmark.triangle.fill"
+        }
+    }
+    
+    private var statusColor: Color {
+        switch vm.dualStreamingManager.streamingStatus {
+        case .stopped: return .gray
+        case .starting: return .orange
+        case .streaming: return .green
+        case .error: return .red
+        }
+    }
+    
+    private var statusText: String {
+        switch vm.dualStreamingManager.streamingStatus {
+        case .stopped: return "Stopped"
+        case .starting: return "Starting..."
+        case .streaming: return "Streaming"
+        case .error(let message): return "Error: \(message)"
+        }
+    }
+    
+    private var buttonIcon: String {
+        vm.dualStreamingManager.isStreaming ? "stop.fill" : "antenna.radiowaves.left.and.right"
+    }
+    
+    private var buttonText: String {
+        vm.dualStreamingManager.isStreaming ? "Stop SRT" : "SRT Bağlan"
+    }
+    
+    private var buttonColor: Color {
+        vm.dualStreamingManager.isStreaming ? .red : .green
     }
 }
 
